@@ -1,0 +1,8 @@
+node_modules
+.vercel
+.supabase
+.env*
+*.log
+.DS_Store
+demo/node_modules
+
