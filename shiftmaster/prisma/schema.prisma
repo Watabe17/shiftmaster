@@ -1,0 +1,438 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 店舗管理テーブル
+model Store {
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String   @db.VarChar(100)
+  address       String?  @db.Text
+  phone         String?  @db.VarChar(20)
+  email         String?  @db.VarChar(255)
+  latitude      Decimal? @db.Decimal(10, 8)
+  longitude     Decimal? @db.Decimal(11, 8)
+  radiusMeters  Int      @default(50) @map("radius_meters")
+  timezone      String   @default("Asia/Tokyo") @db.VarChar(50)
+  businessHours Json?    @map("business_hours")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  // リレーション
+  storeSettings StoreSetting[]
+  employees     Employee[]
+  positions    Position[]
+  shiftTemplates ShiftTemplate[]
+  shiftPeriods ShiftPeriod[]
+  shifts       Shift[]
+  attendanceRecords AttendanceRecord[]
+  aiShiftGenerations AiShiftGeneration[]
+  storeSubscriptions StoreSubscription[]
+
+  @@map("stores")
+}
+
+// 店舗設定
+model StoreSetting {
+  id                    String   @id @default(uuid()) @db.Uuid
+  storeId               String   @map("store_id") @db.Uuid
+  autoBreakEnabled      Boolean  @default(false) @map("auto_break_enabled")
+  autoBreakStartHours   Decimal  @default(6.0) @map("auto_break_start_hours") @db.Decimal(3, 1)
+  autoBreakDurationMinutes Int    @default(60) @map("auto_break_duration_minutes")
+  overtimeThresholdMinutes Int    @default(480) @map("overtime_threshold_minutes")
+  earlyClockInMinutes   Int      @default(30) @map("early_clock_in_minutes")
+  lateClockOutMinutes   Int      @default(30) @map("late_clock_out_minutes")
+  locationStrictMode    Boolean  @default(true) @map("location_strict_mode")
+  notificationSettings  Json?    @map("notification_settings")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // リレーション
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@map("store_settings")
+}
+
+// ユーザープロファイル
+model UserProfile {
+  id        String   @id @db.Uuid
+  email     String?  @db.VarChar(255)
+  fullName  String?  @map("full_name") @db.VarChar(100)
+  avatarUrl String?  @map("avatar_url") @db.Text
+  phone     String?  @db.VarChar(20)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // リレーション
+  employees Employee[]
+
+  @@map("user_profiles")
+}
+
+// 従業員
+model Employee {
+  id                String        @id @default(uuid()) @db.Uuid
+  userId            String?       @map("user_id") @db.Uuid
+  storeId           String        @map("store_id") @db.Uuid
+  employeeCode      String        @unique @map("employee_code") @db.VarChar(20)
+  fullName          String        @map("full_name") @db.VarChar(100)
+  email             String?       @db.VarChar(255)
+  phone             String?       @db.VarChar(20)
+  role              EmployeeRole  @default(EMPLOYEE)
+  status            EmployeeStatus @default(ACTIVE)
+  hireDate          DateTime?     @map("hire_date") @db.Date
+  positionId        String?       @map("position_id") @db.Uuid
+  hourlyWage        Decimal?      @map("hourly_wage") @db.Decimal(8, 0)
+  monthlyLimitHours Int           @default(160) @map("monthly_limit_hours")
+  socialInsuranceEnrolled Boolean @default(false) @map("social_insurance_enrolled")
+  paidLeaveDays     Int           @default(0) @map("paid_leave_days")
+  invitationToken   String?       @unique @map("invitation_token") @db.Uuid
+  invitationExpiresAt DateTime?   @map("invitation_expires_at") @db.Timestamptz(6)
+  qrCodeUrl         String?       @map("qr_code_url") @db.Text
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt         DateTime?     @map("deleted_at") @db.Timestamptz(6)
+
+  // リレーション
+  userProfile       UserProfile?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  store             Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  position          Position?     @relation(fields: [positionId], references: [id])
+  shiftTemplates    ShiftTemplate[]
+  shiftPeriods      ShiftPeriod[]
+  shifts            Shift[]
+  attendanceRecords AttendanceRecord[]
+  notifications     Notification[]
+  
+  // 不足していたリレーション
+  shiftRequests     ShiftRequest[]
+  createdShifts     Shift[]        @relation("ShiftCreatedBy")
+  attendanceEditsCreated AttendanceEdit[] @relation("AttendanceEditCreatedBy")
+  attendanceEditsApproved AttendanceEdit[] @relation("AttendanceEditApprovedBy")
+  aiShiftGenerations AiShiftGeneration[]
+  notificationsSent Notification[] @relation("NotificationSender")
+
+  @@map("employees")
+}
+
+// 従業員ロール
+enum EmployeeRole {
+  EMPLOYEE
+  MANAGER
+  ADMIN
+  SYSTEM_ADMIN
+}
+
+// 従業員ステータス
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+  INVITED
+}
+
+// ポジション
+model Position {
+  id          String   @id @default(uuid()) @db.Uuid
+  storeId     String   @map("store_id") @db.Uuid
+  name        String   @db.VarChar(50)
+  description String?  @db.Text
+  hourlyWage  Decimal? @map("hourly_wage") @db.Decimal(8, 0)
+  color       String   @default("#6B7280") @db.VarChar(7)
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // リレーション
+  store       Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  employees   Employee[]
+  shifts      Shift[]
+
+  @@map("positions")
+}
+
+// シフトテンプレート
+model ShiftTemplate {
+  id           String   @id @default(uuid()) @db.Uuid
+  storeId      String   @map("store_id") @db.Uuid
+  name         String   @db.VarChar(100)
+  description  String?  @db.Text
+  templateData Json     @map("template_data")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdBy    String   @map("created_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // リレーション
+  store        Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  createdByEmployee Employee @relation(fields: [createdBy], references: [id])
+
+  @@map("shift_templates")
+}
+
+// シフト期間
+model ShiftPeriod {
+  id                 String            @id @default(uuid()) @db.Uuid
+  storeId            String            @map("store_id") @db.Uuid
+  name               String            @db.VarChar(100)
+  startDate          DateTime          @map("start_date") @db.Date
+  endDate            DateTime          @map("end_date") @db.Date
+  status             ShiftPeriodStatus @default(DRAFT)
+  submissionDeadline DateTime?         @map("submission_deadline") @db.Timestamptz(6)
+  createdBy          String            @map("created_by") @db.Uuid
+  createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // リレーション
+  store              Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  createdByEmployee  Employee          @relation(fields: [createdBy], references: [id])
+  shiftRequests      ShiftRequest[]
+  shifts             Shift[]
+  aiShiftGenerations AiShiftGeneration[]
+
+  @@map("shift_periods")
+}
+
+// シフト期間ステータス
+enum ShiftPeriodStatus {
+  DRAFT
+  COLLECTING
+  GENERATING
+  PUBLISHED
+  FINALIZED
+}
+
+// シフト希望
+model ShiftRequest {
+  id             String            @id @default(uuid()) @db.Uuid
+  employeeId     String            @map("employee_id") @db.Uuid
+  shiftPeriodId  String            @map("shift_period_id") @db.Uuid
+  requestData    Json              @map("request_data")
+  status         ShiftRequestStatus @default(SUBMITTED)
+  submittedAt    DateTime          @default(now()) @map("submitted_at") @db.Timestamptz(6)
+  updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // リレーション
+  employee       Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  shiftPeriod   ShiftPeriod       @relation(fields: [shiftPeriodId], references: [id], onDelete: Cascade)
+
+  @@map("shift_requests")
+}
+
+// シフト希望ステータス
+enum ShiftRequestStatus {
+  DRAFT
+  SUBMITTED
+  PROCESSED
+}
+
+// 確定シフト
+model Shift {
+  id             String      @id @default(uuid()) @db.Uuid
+  employeeId     String      @map("employee_id") @db.Uuid
+  storeId        String      @map("store_id") @db.Uuid
+  shiftPeriodId  String?     @map("shift_period_id") @db.Uuid
+  positionId     String?     @map("position_id") @db.Uuid
+  date           DateTime    @db.Date
+  startTime      DateTime    @map("start_time") @db.Time(6)
+  endTime        DateTime    @map("end_time") @db.Time(6)
+  breakStartTime DateTime?   @map("break_start_time") @db.Time(6)
+  breakEndTime   DateTime?   @map("break_end_time") @db.Time(6)
+  hourlyWage     Decimal?    @map("hourly_wage") @db.Decimal(8, 0)
+  status         ShiftStatus @default(SCHEDULED)
+  notes          String?     @db.Text
+  createdBy      String?     @map("created_by") @db.Uuid
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // リレーション
+  employee       Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  store          Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  shiftPeriod    ShiftPeriod?     @relation(fields: [shiftPeriodId], references: [id], onDelete: SetNull)
+  position       Position?        @relation(fields: [positionId], references: [id])
+  createdByEmployee Employee?      @relation("ShiftCreatedBy", fields: [createdBy], references: [id])
+  attendanceRecords AttendanceRecord[]
+
+  @@map("shifts")
+}
+
+// シフトステータス
+enum ShiftStatus {
+  SCHEDULED
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+// 勤怠記録
+model AttendanceRecord {
+  id                 String            @id @default(uuid()) @db.Uuid
+  employeeId         String            @map("employee_id") @db.Uuid
+  storeId            String            @map("store_id") @db.Uuid
+  shiftId            String?           @map("shift_id") @db.Uuid
+  date               DateTime          @db.Date
+  clockInTime        DateTime?         @map("clock_in_time") @db.Timestamptz(6)
+  clockOutTime       DateTime?         @map("clock_out_time") @db.Timestamptz(6)
+  clockInLocation    Unsupported("point")? @map("clock_in_location")
+  clockOutLocation   Unsupported("point")? @map("clock_out_location")
+  breakStartTime     DateTime?         @map("break_start_time") @db.Timestamptz(6)
+  breakEndTime       DateTime?         @map("break_end_time") @db.Timestamptz(6)
+  totalBreakMinutes  Int               @default(0) @map("total_break_minutes")
+  totalWorkMinutes   Int?              @map("total_work_minutes")
+  overtimeMinutes    Int               @default(0) @map("overtime_minutes")
+  locationVerified   Boolean           @default(false) @map("location_verified")
+  status             AttendanceStatus  @default(IN_PROGRESS)
+  notes              String?           @db.Text
+  createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // リレーション
+  employee           Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  store              Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  shift              Shift?            @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  attendanceEdits    AttendanceEdit[]
+
+  @@map("attendance_records")
+}
+
+// 勤怠ステータス
+enum AttendanceStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  ABSENT
+}
+
+// 勤怠修正履歴
+model AttendanceEdit {
+  id                 String   @id @default(uuid()) @db.Uuid
+  attendanceRecordId String   @map("attendance_record_id") @db.Uuid
+  editedBy           String   @map("edited_by") @db.Uuid
+  editReason         String   @map("edit_reason") @db.Text
+  oldValues          Json?    @map("old_values")
+  newValues          Json?    @map("new_values")
+  approvedBy         String?  @map("approved_by") @db.Uuid
+  approvedAt         DateTime? @map("approved_at") @db.Timestamptz(6)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // リレーション
+  attendanceRecord   AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+  editedByEmployee   Employee         @relation("AttendanceEditCreatedBy", fields: [editedBy], references: [id])
+  approvedByEmployee Employee?        @relation("AttendanceEditApprovedBy", fields: [approvedBy], references: [id])
+
+  @@map("attendance_edits")
+}
+
+// AIシフト生成履歴
+model AiShiftGeneration {
+  id                 String              @id @default(uuid()) @db.Uuid
+  shiftPeriodId      String              @map("shift_period_id") @db.Uuid
+  storeId            String              @map("store_id") @db.Uuid
+  generationInput    Json                @map("generation_input")
+  generationOutput   Json?               @map("generation_output")
+  aiModel            String              @default("gemini-pro") @map("ai_model") @db.VarChar(50)
+  status             AiGenerationStatus @default(PENDING)
+  errorMessage       String?             @map("error_message") @db.Text
+  createdBy          String              @map("created_by") @db.Uuid
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt        DateTime?           @map("completed_at") @db.Timestamptz(6)
+
+  // リレーション
+  shiftPeriod        ShiftPeriod        @relation(fields: [shiftPeriodId], references: [id], onDelete: Cascade)
+  store              Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  createdByEmployee  Employee           @relation(fields: [createdBy], references: [id])
+
+  @@map("ai_shift_generations")
+}
+
+// AI生成ステータス
+enum AiGenerationStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// 通知
+model Notification {
+  id         String            @id @default(uuid()) @db.Uuid
+  recipientId String           @map("recipient_id") @db.Uuid
+  senderId   String?           @map("sender_id") @db.Uuid
+  title      String            @db.VarChar(200)
+  message    String            @db.Text
+  type       NotificationType  @map("type")
+  data       Json?             @map("data")
+  readAt     DateTime?         @map("read_at") @db.Timestamptz(6)
+  expiresAt  DateTime?         @map("expires_at") @db.Timestamptz(6)
+  createdAt  DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // リレーション
+  recipient Employee           @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  sender    Employee?         @relation("NotificationSender", fields: [senderId], references: [id])
+
+  @@map("notifications")
+}
+
+// 通知タイプ
+enum NotificationType {
+  SHIFT_ASSIGNED
+  SHIFT_CHANGED
+  SHIFT_REMINDER
+  ATTENDANCE_ALERT
+  SYSTEM
+}
+
+// 料金プラン
+model BillingPlan {
+  id                String   @id @default(uuid()) @db.Uuid
+  name              String   @db.VarChar(100)
+  description       String?  @db.Text
+  pricePerEmployee  Decimal  @map("price_per_employee") @db.Decimal(8, 0)
+  maxEmployees      Int?     @map("max_employees")
+  features          Json?    @map("features")
+  isActive          Boolean  @default(true) @map("is_active")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // リレーション
+  storeSubscriptions StoreSubscription[]
+
+  @@map("billing_plans")
+}
+
+// 店舗契約
+model StoreSubscription {
+  id                    String            @id @default(uuid()) @db.Uuid
+  storeId               String            @map("store_id") @db.Uuid
+  billingPlanId         String            @map("billing_plan_id") @db.Uuid
+  stripeCustomerId      String?           @map("stripe_customer_id") @db.VarChar(255)
+  stripeSubscriptionId  String?           @map("stripe_subscription_id") @db.VarChar(255)
+  status                SubscriptionStatus @default(ACTIVE)
+  currentPeriodStart    DateTime?         @map("current_period_start") @db.Timestamptz(6)
+  currentPeriodEnd      DateTime?         @map("current_period_end") @db.Timestamptz(6)
+  trialEnd              DateTime?         @map("trial_end") @db.Timestamptz(6)
+  employeeCount         Int               @default(0) @map("employee_count")
+  createdAt             DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // リレーション
+  store                 Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  billingPlan           BillingPlan       @relation(fields: [billingPlanId], references: [id])
+
+  @@map("store_subscriptions")
+}
+
+// サブスクリプションステータス
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELED
+  UNPAID
+}
