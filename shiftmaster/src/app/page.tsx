@@ -1,24 +1,34 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 
 export default function HomePage() {
   const { user, loading } = useAuth()
   const router = useRouter()
+  const [isInitialized, setIsInitialized] = useState(false)
 
   useEffect(() => {
-    if (!loading) {
+    // 初期化の遅延を追加
+    const timer = setTimeout(() => {
+      setIsInitialized(true)
+    }, 1000)
+
+    return () => clearTimeout(timer)
+  }, [])
+
+  useEffect(() => {
+    if (isInitialized && !loading) {
       if (user) {
         router.push('/dashboard')
       } else {
         router.push('/auth/login')
       }
     }
-  }, [user, loading, router])
+  }, [user, loading, router, isInitialized])
 
-  if (loading) {
+  if (loading || !isInitialized) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
