@@ -1,33 +1,23 @@
-'use client'
-
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
-
 export default function HomePage() {
-  const router = useRouter()
-  const [isInitialized, setIsInitialized] = useState(false)
-
-  useEffect(() => {
-    // 初期化の遅延を追加
-    const timer = setTimeout(() => {
-      setIsInitialized(true)
-      // 認証状態に関係なく、ログインページにリダイレクト
-      router.push('/auth/login')
-    }, 1000)
-
-    return () => clearTimeout(timer)
-  }, [router])
-
-  if (!isInitialized) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900 mx-auto"></div>
-          <p className="mt-4 text-lg">読み込み中...</p>
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="text-center">
+        <h1 className="text-4xl font-bold text-gray-900 mb-4">ShiftMaster</h1>
+        <p className="text-lg text-gray-600 mb-8">AI支援シフト管理システム</p>
+        <div className="space-y-4">
+          <a 
+            href="/auth/login" 
+            className="inline-block bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            ログイン
+          </a>
+          <div className="text-sm text-gray-500">
+            <a href="/auth/register" className="text-blue-600 hover:underline">
+              新規登録
+            </a>
+          </div>
         </div>
       </div>
-    )
-  }
-
-  return null
+    </div>
+  )
 }
