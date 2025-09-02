@@ -2,10 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useAuth } from '@/contexts/AuthContext'
 
 export default function HomePage() {
-  const { user, loading } = useAuth()
   const router = useRouter()
   const [isInitialized, setIsInitialized] = useState(false)
 
@@ -13,22 +11,14 @@ export default function HomePage() {
     // 初期化の遅延を追加
     const timer = setTimeout(() => {
       setIsInitialized(true)
+      // 認証状態に関係なく、ログインページにリダイレクト
+      router.push('/auth/login')
     }, 1000)
 
     return () => clearTimeout(timer)
-  }, [])
+  }, [router])
 
-  useEffect(() => {
-    if (isInitialized && !loading) {
-      if (user) {
-        router.push('/dashboard')
-      } else {
-        router.push('/auth/login')
-      }
-    }
-  }, [user, loading, router, isInitialized])
-
-  if (loading || !isInitialized) {
+  if (!isInitialized) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
