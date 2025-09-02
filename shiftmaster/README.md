@@ -1,36 +1,171 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ShiftMaster - シフト管理システム
 
-## Getting Started
+AI支援によるシフト作成機能を持つ、シンプルで使いやすいシフト管理システムです。
 
-First, run the development server:
+## 機能
+
+- 📅 AI支援シフト作成（Google Gemini API使用）
+- 👥 従業員管理
+- ⏰ 勤怠管理（位置情報対応）
+- 🏪 店舗設定管理
+- 📊 レポート・分析
+
+## セットアップ
+
+### 1. 依存関係のインストール
+
+```bash
+npm install
+```
+
+### 2. 環境変数の設定
+
+`.env.local` ファイルを作成し、以下の環境変数を設定してください：
+
+```bash
+# Gemini API設定
+# Google AI Studio (https://aistudio.google.com/) でAPIキーを取得してください
+NEXT_PUBLIC_GEMINI_API_KEY=your_gemini_api_key_here
+
+# Supabase設定
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url_here
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key_here
+
+# データベース設定
+DATABASE_URL=your_database_url_here
+```
+
+### 3. Gemini APIキーの取得
+
+1. [Google AI Studio](https://aistudio.google.com/) にアクセス
+2. Googleアカウントでログイン
+3. 「Get API key」をクリック
+4. 新しいAPIキーを作成
+5. 作成されたAPIキーをコピーして `.env.local` に設定
+
+### 4. データベースのセットアップ
+
+```bash
+# Prismaクライアントの生成
+npx prisma generate
+
+# データベースのマイグレーション
+npx prisma db push
+
+# シードデータの投入（オプション）
+npx prisma db seed
+```
+
+### 5. 開発サーバーの起動
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## AIシフト生成機能
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 使用方法
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. 管理者としてログイン
+2. 「シフト作成」メニューにアクセス
+3. 対象期間とルールセットを選択
+4. 従業員の希望を確認
+5. 「シフトを生成」ボタンをクリック
 
-## Learn More
+### エラーハンドリング
 
-To learn more about Next.js, take a look at the following resources:
+Gemini APIの利用制限に達した場合：
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- **レート制限エラー**: 自動的にリトライされます
+- **クォータ制限エラー**: 手動生成モードが利用可能
+- **APIキーエラー**: 設定を確認してください
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### フォールバック機能
 
-## Deploy on Vercel
+AI生成が利用できない場合、以下の代替手段が提供されます：
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- 手動シフト生成（基本的なルールに基づく自動生成）
+- 従業員の希望を考慮した基本的なシフト配置
+- ポジション別必要人数の充足
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 技術スタック
+
+- **フロントエンド**: Next.js 15, React, TypeScript
+- **スタイリング**: Tailwind CSS, shadcn/ui
+- **バックエンド**: Supabase, Prisma
+- **AI**: Google Gemini API
+- **データベース**: PostgreSQL
+
+## トラブルシューティング
+
+### Gemini APIエラー
+
+```
+Gemini API エラーレスポンス: "You exceeded your current quota"
+```
+
+**解決方法**:
+1. Google AI Studioで利用制限を確認
+2. 有料プランへの移行を検討
+3. 手動生成モードを使用
+4. しばらく時間をおいて再試行
+
+### レート制限エラー
+
+```
+429: RESOURCE_EXHAUSTED
+```
+
+**解決方法**:
+1. 自動リトライを待つ
+2. リトライ待機時間を確認
+3. 手動生成モードを使用
+
+## Vercelデプロイ
+
+### 1. Vercelプロジェクトの作成
+
+1. [Vercel](https://vercel.com) にアクセスしてアカウントを作成
+2. 「New Project」をクリック
+3. GitHubリポジトリをインポート
+4. プロジェクト名を設定（例：`shiftmaster`）
+
+### 2. 環境変数の設定
+
+Vercelダッシュボードで以下の環境変数を設定してください：
+
+```bash
+# Supabase設定
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url_here
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key_here
+
+# データベース設定
+DATABASE_URL=your_database_url_here
+```
+
+### 3. GitHub Secretsの設定
+
+GitHubリポジトリの「Settings」→「Secrets and variables」→「Actions」で以下を設定：
+
+- `VERCEL_TOKEN`: VercelのAPIトークン
+- `ORG_ID`: Vercelの組織ID
+- `PROJECT_ID`: VercelのプロジェクトID
+- `NEXT_PUBLIC_SUPABASE_URL`: SupabaseのURL
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabaseの匿名キー
+
+### 4. 自動デプロイ
+
+mainブランチにプッシュすると、GitHub Actionsが自動的にVercelにデプロイします。
+
+## ライセンス
+
+MIT License
+
+## サポート
+
+問題が発生した場合は、以下の手順で対処してください：
+
+1. エラーログを確認
+2. 環境変数の設定を確認
+3. APIキーの有効性を確認
+4. ネットワーク接続を確認

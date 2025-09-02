@@ -1,8 +1,8 @@
 'use client'
 
-import React, { useState } from 'react';
-import { MessageSquare, ArrowRight, ArrowLeft, Check, Building, User, Eye, EyeOff, HelpCircle, AlertCircle } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect } from 'react';
+import { MessageSquare, ArrowRight, ArrowLeft, Check, Building, User, Eye, EyeOff, HelpCircle, AlertCircle, UserCheck } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
@@ -25,12 +25,27 @@ interface Errors {
   termsAccepted?: string;
 }
 
+interface InvitationData {
+  status: 'valid' | 'expired' | 'used';
+  employee_name?: string;
+  employee_code?: string;
+  store_name?: string;
+  email?: string;
+  message?: string;
+}
+
 const RegisterPage = () => {
   const [currentStep, setCurrentStep] = useState(1);
   const [showPassword, setShowPassword] = useState(false);
   const [showGoogleMapHelp, setShowGoogleMapHelp] = useState(false);
   const { signUp } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  
+  // 招待リンクの処理
+  const [invitationData, setInvitationData] = useState<InvitationData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [isInvited, setIsInvited] = useState(false);
   
   const [formData, setFormData] = useState<FormData>({
     email: '',
@@ -50,6 +65,45 @@ const RegisterPage = () => {
     { number: 2, title: '基本情報' },
     { number: 3, title: '利用規約' }
   ];
+
+  // 招待リンクの処理
+  useEffect(() => {
+    const inviteToken = searchParams.get('invite');
+    if (inviteToken) {
+      verifyInvitation(inviteToken);
+    } else {
+      setLoading(false);
+    }
+  }, [searchParams]);
+
+  const verifyInvitation = async (token: string) => {
+    try {
+      // inviteパラメータをtokenとしてAPIに送信
+      const response = await fetch(`/api/invitations?token=${token}`);
+      const data = await response.json();
+      
+      if (response.ok) {
+        setInvitationData(data);
+        if (data.email) {
+          setFormData(prev => ({ ...prev, email: data.email }));
+        }
+        if (data.employee_name) {
+          setFormData(prev => ({ ...prev, name: data.employee_name }));
+        }
+        setIsInvited(true);
+        toast.success('招待リンクが確認されました');
+      } else {
+        toast.error(data.error || '招待リンクの検証に失敗しました');
+        setIsInvited(false);
+      }
+    } catch (error) {
+      console.error('招待検証エラー:', error);
+      toast.error('招待リンクの検証中にエラーが発生しました');
+      setIsInvited(false);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const validateStep = (step: number): boolean => {
     const newErrors: Errors = {};
@@ -127,6 +181,18 @@ const RegisterPage = () => {
 
   const progressWidth = ((currentStep - 1) / (steps.length - 1)) * 100;
 
+  // ローディング中
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600">招待情報を確認中...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="w-full max-w-2xl">
@@ -136,8 +202,28 @@ const RegisterPage = () => {
             <MessageSquare className="w-9 h-9 text-white" />
           </div>
           <h1 className="text-3xl font-bold text-gray-900">ShiftMaster</h1>
-          <p className="text-gray-600 mt-2">新規アカウント作成</p>
+          <p className="text-gray-600 mt-2">
+            {isInvited ? '従業員アカウント作成' : '新規アカウント作成'}
+          </p>
         </div>
+
+        {/* 招待情報の表示 */}
+        {isInvited && invitationData && (
+          <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex gap-3">
+              <UserCheck className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+              <div className="text-sm">
+                <p className="font-semibold text-blue-900 mb-1">招待情報</p>
+                <div className="text-blue-700 space-y-1">
+                  <p><span className="font-medium">従業員:</span> {invitationData.employee_name}</p>
+                  <p><span className="font-medium">従業員コード:</span> {invitationData.employee_code}</p>
+                  <p><span className="font-medium">店舗:</span> {invitationData.store_name}</p>
+                  <p><span className="font-medium">メール:</span> {invitationData.email}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* スタイリッシュなプログレスバー */}
         <div className="mb-16">
@@ -212,7 +298,7 @@ const RegisterPage = () => {
         </div>
 
         {/* フォームコンテンツ */}
-        <div className="bg-white rounded-2xl shadow-xl p-8">
+        <form onSubmit={(e) => { e.preventDefault(); handleNext(); }} className="bg-white rounded-2xl shadow-xl p-8">
           {/* Step 1: アカウント情報 */}
           {currentStep === 1 && (
             <div className="space-y-6">
@@ -230,6 +316,7 @@ const RegisterPage = () => {
                     errors.email ? 'border-red-300' : 'border-gray-200'
                   }`}
                   placeholder="you@example.com"
+                  readOnly={isInvited}
                 />
                 {errors.email && (
                   <p className="mt-2 text-sm text-red-600">{errors.email}</p>
@@ -304,6 +391,7 @@ const RegisterPage = () => {
                     errors.name ? 'border-red-300' : 'border-gray-200'
                   }`}
                   placeholder="山田 太郎"
+                  readOnly={isInvited}
                 />
                 {errors.name && (
                   <p className="mt-2 text-sm text-red-600">{errors.name}</p>
@@ -403,8 +491,10 @@ const RegisterPage = () => {
                   <div className="text-sm">
                     <p className="font-semibold text-blue-900 mb-1">登録完了後について</p>
                     <p className="text-blue-700">
-                      アカウント登録完了後、ログインして店舗情報を設定していただきます。
-                      1アカウントで最大5店舗まで管理可能です。
+                      {isInvited 
+                        ? 'アカウント登録完了後、ログインして勤怠管理システムをご利用いただけます。'
+                        : 'アカウント登録完了後、ログインして店舗情報を設定していただきます。1アカウントで最大5店舗まで管理可能です。'
+                      }
                     </p>
                   </div>
                 </div>
@@ -416,6 +506,7 @@ const RegisterPage = () => {
           <div className="flex items-center justify-between mt-8">
             {currentStep > 1 ? (
               <button
+                type="button"
                 onClick={handleBack}
                 className="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-medium transition-colors"
               >
@@ -424,6 +515,7 @@ const RegisterPage = () => {
               </button>
             ) : (
               <button 
+                type="button"
                 onClick={() => router.push('/auth/login')}
                 className="text-blue-600 hover:text-blue-700 font-medium transition-colors"
               >
@@ -432,14 +524,14 @@ const RegisterPage = () => {
             )}
 
             <button
-              onClick={handleNext}
+              type="submit"
               className="bg-blue-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all flex items-center gap-2"
             >
               {currentStep === 3 ? '登録する' : '次へ'}
               <ArrowRight className="w-5 h-5" />
             </button>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   );

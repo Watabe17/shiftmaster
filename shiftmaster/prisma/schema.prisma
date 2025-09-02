@@ -118,6 +118,7 @@ model Employee {
   attendanceEditsApproved AttendanceEdit[] @relation("AttendanceEditApprovedBy")
   aiShiftGenerations AiShiftGeneration[]
   notificationsSent Notification[] @relation("NotificationSender")
+  invitations       Invitation[]
 
   @@map("employees")
 }
@@ -435,4 +436,21 @@ enum SubscriptionStatus {
   PAST_DUE
   CANCELED
   UNPAID
+}
+
+// 招待テーブル
+model Invitation {
+  id          String    @id @default(uuid()) @db.Uuid
+  token       String    @unique @db.VarChar(255)
+  employeeId  String    @map("employee_id") @db.Uuid
+  email       String?   @db.VarChar(255)
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt      DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // リレーション
+  employee   Employee   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@map("invitations")
 }

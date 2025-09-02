@@ -17,8 +17,15 @@ const nextConfig = {
     }
     return config
   },
+  // Vercelデプロイ用の最適化設定
+  output: 'standalone',
   experimental: {
     // turbo設定は削除（deprecated）
+  },
+  // 画像最適化設定
+  images: {
+    domains: ['localhost'],
+    unoptimized: false,
   },
 }
 

@@ -61,6 +61,22 @@ export interface AIGenerationResult {
   suggestions: string[]
 }
 
+// エラーの種類を定義
+export enum AIErrorType {
+  QUOTA_EXCEEDED = 'QUOTA_EXCEEDED',
+  RATE_LIMIT = 'RATE_LIMIT',
+  API_KEY_INVALID = 'API_KEY_INVALID',
+  NETWORK_ERROR = 'NETWORK_ERROR',
+  UNKNOWN_ERROR = 'UNKNOWN_ERROR'
+}
+
+export interface AIError {
+  type: AIErrorType
+  message: string
+  retryAfter?: number // 秒単位
+  details?: any
+}
+
 class AIShiftGenerator {
   private apiKey: string
   private baseUrl: string
@@ -84,6 +100,11 @@ class AIShiftGenerator {
     try {
       console.log('AIシフト生成開始:', { month, employeePreferences, positionRequirements, shiftRules })
       
+      // APIキーの検証
+      if (!this.apiKey || this.apiKey === 'dummy-key') {
+        throw this.createError(AIErrorType.API_KEY_INVALID, 'APIキーが設定されていません')
+      }
+
       // Gemini APIに送信するプロンプトを構築
       const prompt = this.buildPrompt(
         month,
@@ -122,9 +143,28 @@ class AIShiftGenerator {
         warnings,
         suggestions
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('AIシフト生成エラー:', error)
-      throw new Error('シフト生成に失敗しました。しばらく時間をおいて再試行してください。')
+      
+      // エラーの種類を判定
+      if (error.type === AIErrorType.QUOTA_EXCEEDED) {
+        throw error
+      } else if (error.type === AIErrorType.RATE_LIMIT) {
+        throw error
+      } else {
+        throw this.createError(AIErrorType.UNKNOWN_ERROR, 'シフト生成に失敗しました。しばらく時間をおいて再試行してください。')
+      }
+    }
+  }
+
+  /**
+   * エラーオブジェクトを作成
+   */
+  private createError(type: AIErrorType, message: string, details?: any): AIError {
+    return {
+      type,
+      message,
+      details
     }
   }
 
@@ -255,26 +295,73 @@ ${existingShifts.map(shift =>
           return data.candidates[0]?.content?.parts[0]?.text || ''
         }
 
-        // 429エラーの場合は待機してリトライ
+        // エラーレスポンスの詳細解析
+        const errorText = await response.text()
+        console.error('Gemini API エラーレスポンス:', errorText)
+
+        // 429エラー（レート制限・クォータ制限）
         if (response.status === 429) {
-          const delay = baseDelay * Math.pow(2, attempt - 1) // 指数バックオフ
+          // クォータ制限エラーの場合は即座にエラーを投げる
+          if (errorText.includes('RESOURCE_EXHAUSTED') || errorText.includes('quota')) {
+            throw this.createError(
+              AIErrorType.QUOTA_EXCEEDED,
+              'Gemini APIの利用制限に達しました。手動でシフトを作成するか、しばらく時間をおいて再試行してください。',
+              { errorText }
+            )
+          }
+
+          // レート制限エラーの場合はリトライ
+          const retryAfter = this.parseRetryAfter(errorText)
+          const delay = retryAfter || (baseDelay * Math.pow(2, attempt - 1))
+          
           console.log(`レート制限エラー (429)。${delay}ms待機してリトライ...`)
           
           if (attempt < maxRetries) {
             await new Promise(resolve => setTimeout(resolve, delay))
             continue
+          } else {
+            const retrySeconds = retryAfter ? Math.ceil(retryAfter / 1000) : 60
+            throw this.createError(
+              AIErrorType.RATE_LIMIT, 
+              `レート制限によりAPI呼び出しができません。${retrySeconds}秒後に再試行してください。`,
+              { retryAfter }
+            )
+          }
+        }
+
+        // 400エラー（APIキー無効など）
+        if (response.status === 400) {
+          if (errorText.includes('API key') || errorText.includes('invalid')) {
+            throw this.createError(
+              AIErrorType.API_KEY_INVALID,
+              'APIキーが無効です。設定を確認してください。'
+            )
           }
         }
 
         // その他のエラー
-        const errorText = await response.text()
-        console.error('Gemini API エラーレスポンス:', errorText)
-        throw new Error(`Gemini API エラー: ${response.status} ${response.statusText}`)
+        throw this.createError(
+          AIErrorType.UNKNOWN_ERROR,
+          `Gemini API エラー: ${response.status} ${response.statusText}`,
+          { responseText: errorText }
+        )
 
-      } catch (error) {
+      } catch (error: any) {
         console.error(`リトライ ${attempt}/${maxRetries} でエラー:`, error)
         
+        // 既にAIErrorの場合はそのまま投げる
+        if (error.type) {
+          throw error
+        }
+        
         if (attempt === maxRetries) {
+          // ネットワークエラーの場合
+          if (error.name === 'TypeError' || error.message.includes('fetch')) {
+            throw this.createError(
+              AIErrorType.NETWORK_ERROR,
+              'ネットワークエラーが発生しました。インターネット接続を確認してください。'
+            )
+          }
           throw error
         }
         
@@ -285,7 +372,30 @@ ${existingShifts.map(shift =>
       }
     }
 
-    throw new Error('最大リトライ回数に達しました')
+    throw this.createError(
+      AIErrorType.UNKNOWN_ERROR,
+      '最大リトライ回数に達しました'
+    )
+  }
+
+  /**
+   * エラーレスポンスからリトライ待機時間を抽出
+   */
+  private parseRetryAfter(errorText: string): number | null {
+    try {
+      const data = JSON.parse(errorText)
+      const retryInfo = data.error?.details?.find((d: any) => d['@type'] === 'type.googleapis.com/google.rpc.RetryInfo')
+      if (retryInfo?.retryDelay) {
+        // "13s" のような形式を秒数に変換
+        const match = retryInfo.retryDelay.match(/(\d+)s/)
+        if (match) {
+          return parseInt(match[1]) * 1000 // ミリ秒に変換
+        }
+      }
+    } catch (e) {
+      console.warn('リトライ時間の解析に失敗:', e)
+    }
+    return null
   }
 
   /**
@@ -538,3 +648,5 @@ export function getAIShiftGenerator(apiKey: string): AIShiftGenerator {
 export function resetAIShiftGenerator(): void {
   generatorInstance = null
 }
+
+// エラータイプは既に上で定義・エクスポートされているため、ここでの重複エクスポートは不要

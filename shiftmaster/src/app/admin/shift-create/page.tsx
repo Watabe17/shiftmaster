@@ -1,1177 +1,930 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import React, { useState, useEffect } from 'react'
+import {
+  Calendar, Users, ChevronLeft, Menu, LogOut, Settings, Clock, Home,
+  CheckCircle, AlertCircle, ChevronRight, Save, Sparkles, UserCheck,
+  FileText, X, Edit2, Plus, ArrowRight, Info, Target,
+  AlertTriangle, Sliders, List, Eye, ChevronDown, ChevronUp,
+  CalendarDays, UserX, FileUp, Grid3x3, BarChart, Trash2,
+  Edit3, Download, RefreshCw, AlertCircle as AlertCircleIcon
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { getAIShiftGenerator, type EmployeePreference, type PositionRequirement, type ShiftRule, type GeneratedShift, type AIGenerationResult } from '@/lib/ai-shift-generator'
-import { ShiftCalendar } from '@/components/ShiftCalendar'
+import { getAIShiftGenerator, resetAIShiftGenerator } from '@/lib/ai-shift-generator'
 
-interface ShiftPreference {
-  employee_id: string
-  date: string
-  available: boolean
-  preferred_start?: string
-  preferred_end?: string
-  priority?: 'high' | 'medium' | 'low'
-  reason?: string
-}
-
+// 従業員の型定義
 interface Employee {
   id: string
   name: string
-  employeeCode: string
-  position: string
-  status: 'active' | 'inactive'
+  positions: string[]
+  employment_type: string
+  monthly_limit: number
+  monthly_current: number
 }
 
-interface ShiftPeriod {
+// シフト希望の型定義
+interface ShiftRequest {
   id: string
-  name: string
-  start_date: string
-  end_date: string
-  status: 'draft' | 'collecting' | 'generating' | 'published' | 'finalized'
-  submission_deadline: string
-}
-
-interface Shift {
-  id: string
-  employee_id: string
+  employeeId: string
+  employeeName: string
   date: string
-  start_time: string
-  end_time: string
-  position: string
-  status: 'scheduled' | 'confirmed' | 'cancelled' | 'completed'
+  status: 'available' | 'unavailable' | 'preferred'
+  preferredStartTime?: string
+  preferredEndTime?: string
+  notes?: string
 }
 
-export default function ShiftCreatePage() {
-  const [currentStep, setCurrentStep] = useState(-1) // -1: 初期設定, 0: 希望確認, 1: AI生成, 2: 調整・確定
-  const [selectedRuleSet, setSelectedRuleSet] = useState('')
-  const [selectedPositions, setSelectedPositions] = useState<string[]>([])
-  const [shiftPeriod, setShiftPeriod] = useState<ShiftPeriod | null>(null)
-  const [employees, setEmployees] = useState<Employee[]>([])
-  const [shiftPreferences, setShiftPreferences] = useState<{ [key: string]: ShiftPreference[] }>({})
+// ポジション要件の型定義
+interface PositionRequirement {
+  id: string
+  positionName: string
+  minEmployees: number
+  maxEmployees: number
+  preferredStartTime: string
+  preferredEndTime: string
+  breakMinutes: number
+}
+
+// シフトルールの型定義
+interface ShiftRule {
+  maxConsecutiveDays: number
+  minRestHours: number
+  preferredShiftPattern: 'morning' | 'afternoon' | 'evening' | 'mixed'
+  avoidOvertime: boolean
+  balanceWorkload: boolean
+  considerPreferences: boolean
+}
+
+// 生成されたシフトの型定義
+interface GeneratedShift {
+  id: string
+  date: string
+  employeeId: string
+  employeeName: string
+  positionId: string
+  positionName: string
+  startTime: string
+  endTime: string
+  breakMinutes: number
+  confidence: number
+  reasoning: string
+}
+
+const ShiftCreatePage = () => {
+  const router = useRouter()
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [activeMenu, setActiveMenu] = useState('shift')
+  const [selectedStore] = useState({ id: 'store-1', name: 'カフェ Sunny 渋谷店' })
+  const [currentStep, setCurrentStep] = useState(0)
+  const [selectedMonth, setSelectedMonth] = useState('2025-02')
+  const [selectedRuleSet, setSelectedRuleSet] = useState('normal')
+  const [selectedPosition, setSelectedPosition] = useState('all')
+  const [aiGenerating, setAiGenerating] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+  const [showFallbackModal, setShowFallbackModal] = useState(false)
   const [generatedShifts, setGeneratedShifts] = useState<GeneratedShift[]>([])
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [selectedView, setSelectedView] = useState<'shifts' | 'staffing' | 'csv'>('shifts')
-  const [editingShift, setEditingShift] = useState<GeneratedShift | null>(null)
-  const [editModalOpen, setEditModalOpen] = useState(false)
-  const [aiGenerationResult, setAiGenerationResult] = useState<AIGenerationResult | null>(null)
-  const [isShiftsConfirmed, setIsShiftsConfirmed] = useState(false) // シフト確定状態
-  const [confirmationComment, setConfirmationComment] = useState('') // 確定時のコメント
-  const [selectedDate, setSelectedDate] = useState<string | null>(null) // 選択された日付
+  const [manualShifts, setManualShifts] = useState<GeneratedShift[]>([])
 
-  // モックデータ
-  const positions = ['ホール', 'キッチン', 'レジ']
-  useEffect(() => {
-    setEmployees([
-      { id: '1', name: '佐藤太郎', employeeCode: 'E001', position: 'ホール', status: 'active' },
-      { id: '2', name: '鈴木花子', employeeCode: 'E002', position: 'キッチン', status: 'active' },
-      { id: '3', name: '田中一郎', employeeCode: 'E003', position: 'レジ', status: 'active' },
-      { id: '4', name: '高橋美咲', employeeCode: 'E004', position: 'ホール', status: 'active' },
-      { id: '5', name: '伊藤健太', employeeCode: 'E005', position: 'キッチン', status: 'active' }
-    ])
+  // サンプルデータ
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-    setShiftPeriod({
-      id: '1',
-      name: '2025年2月',
-      start_date: '2025-02-01',
-      end_date: '2025-02-28',
-      status: 'collecting',
-      submission_deadline: '2025-01-25T23:59:59Z'
-    })
-
-    // モックのシフト希望データ
-    const mockPreferences: { [key: string]: ShiftPreference[] } = {}
-    for (let i = 1; i <= 28; i++) {
-      const date = `2025-02-${i.toString().padStart(2, '0')}`
-      mockPreferences[date] = employees.map(emp => ({
-        employee_id: emp.id, // 従業員IDを追加
-        date,
-        available: Math.random() > 0.3,
-        preferred_start: Math.random() > 0.5 ? '09:00' : '10:00',
-        preferred_end: Math.random() > 0.5 ? '17:00' : '18:00',
-        priority: Math.random() > 0.7 ? 'high' : Math.random() > 0.5 ? 'medium' : 'low'
-      }))
+  // データベースから従業員一覧を取得
+  const fetchEmployees = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      
+      const response = await fetch('/api/employees?storeId=24827f88-3b69-4548-aa9c-d26db7bc417c')
+      if (!response.ok) {
+        throw new Error('従業員データの取得に失敗しました')
+      }
+      
+      const result = await response.json()
+      if (result.success && result.data.length > 0) {
+        // データベースから取得したデータを変換
+        const dbEmployees = result.data.map((dbEmp: any) => ({
+          id: dbEmp.id,
+          name: dbEmp.fullName,
+          positions: dbEmp.position ? [dbEmp.position.id] : ['hall'],
+          employment_type: dbEmp.role === 'MANAGER' || dbEmp.role === 'ADMIN' || dbEmp.role === 'SYSTEM_ADMIN' ? 'full_time' : 'part_time',
+          monthly_limit: dbEmp.monthlyLimitHours || 120,
+          monthly_current: 0 // 今月の勤務時間は後で計算
+        }))
+        setEmployees(dbEmployees)
+        console.log('✅ 従業員データ取得成功:', dbEmployees)
+      } else {
+        // データベースが空の場合は初期データを使用
+        setEmployees([
+          {
+            id: 'e1',
+            name: '佐藤 太郎',
+            positions: ['hall', 'cashier'],
+            employment_type: 'full_time',
+            monthly_limit: 160,
+            monthly_current: 145
+          },
+          {
+            id: 'e2',
+            name: '鈴木 花子',
+            positions: ['kitchen', 'manager'],
+            employment_type: 'full_time',
+            monthly_limit: 160,
+            monthly_current: 152
+          },
+          {
+            id: 'e3',
+            name: '田中 一郎',
+            positions: ['hall'],
+            employment_type: 'part_time',
+            monthly_limit: 120,
+            monthly_current: 98
+          },
+          {
+            id: 'e4',
+            name: '高橋 美咲',
+            positions: ['kitchen'],
+            employment_type: 'part_time',
+            monthly_limit: 120,
+            monthly_current: 85
+          },
+          {
+            id: 'e5',
+            name: '伊藤 健太',
+            positions: ['cashier', 'hall'],
+            employment_type: 'part_time',
+            monthly_limit: 120,
+            monthly_current: 92
+          }
+        ])
+        console.log('データベースが空のため、初期データを使用します')
+      }
+    } catch (error) {
+      console.error('従業員データ取得エラー:', error)
+      setError('データの取得に失敗しました。初期データを表示します。')
+      // エラー時は初期データを使用
+      setEmployees([
+        {
+          id: 'e1',
+          name: '佐藤 太郎',
+          positions: ['hall', 'cashier'],
+          employment_type: 'full_time',
+          monthly_limit: 160,
+          monthly_current: 145
+        },
+        {
+          id: 'e2',
+          name: '鈴木 花子',
+          positions: ['kitchen', 'manager'],
+          employment_type: 'full_time',
+          monthly_limit: 160,
+          monthly_current: 152
+        },
+        {
+          id: 'e3',
+          name: '田中 一郎',
+          positions: ['hall'],
+          employment_type: 'part_time',
+          monthly_limit: 120,
+          monthly_current: 98
+        },
+        {
+          id: 'e4',
+          name: '高橋 美咲',
+          positions: ['kitchen'],
+          employment_type: 'part_time',
+          monthly_limit: 120,
+          monthly_current: 85
+        },
+        {
+          id: 'e5',
+          name: '伊藤 健太',
+          positions: ['cashier', 'hall'],
+          employment_type: 'part_time',
+          monthly_limit: 120,
+          monthly_current: 92
+        }
+      ])
+    } finally {
+      setLoading(false)
     }
-    setShiftPreferences(mockPreferences)
+  }
+
+  // コンポーネントマウント時にデータを取得
+  useEffect(() => {
+    fetchEmployees()
   }, [])
 
-  const ruleSets = [
-    { id: 'normal', name: '通常期', description: '標準配置', color: 'bg-blue-500' },
-    { id: 'busy', name: '繁忙期', description: '増員体制', color: 'bg-orange-500' },
-    { id: 'quiet', name: '閑散期', description: '少人数', color: 'bg-green-500' }
-  ]
+  const [shiftRequests] = useState<ShiftRequest[]>([
+    {
+      id: 'r1',
+      employeeId: 'e1',
+      employeeName: '佐藤 太郎',
+      date: '2025-02-01',
+      status: 'available',
+      preferredStartTime: '09:00',
+      preferredEndTime: '17:00'
+    },
+    {
+      id: 'r2',
+      employeeId: 'e2',
+      employeeName: '鈴木 花子',
+      date: '2025-02-01',
+      status: 'available',
+      preferredStartTime: '10:00',
+      preferredEndTime: '18:00'
+    },
+    {
+      id: 'r3',
+      employeeId: 'e3',
+      employeeName: '田中 一郎',
+      date: '2025-02-01',
+      status: 'unavailable'
+    },
+    {
+      id: 'r4',
+      employeeId: 'e4',
+      employeeName: '高橋 美咲',
+      date: '2025-02-01',
+      status: 'available',
+      preferredStartTime: '11:00',
+      preferredEndTime: '19:00'
+    },
+    {
+      id: 'r5',
+      employeeId: 'e5',
+      employeeName: '伊藤 健太',
+      date: '2025-02-01',
+      status: 'preferred',
+      preferredStartTime: '12:00',
+      preferredEndTime: '20:00'
+    }
+  ])
 
-  // AIシフト生成の設定
-  const aiShiftRules: ShiftRule = {
-    maxConsecutiveDays: 6,
+  const [positionRequirements] = useState<PositionRequirement[]>([
+    {
+      id: 'p1',
+      positionName: 'キッチン',
+      minEmployees: 1,
+      maxEmployees: 3,
+      preferredStartTime: '09:00',
+      preferredEndTime: '21:00',
+      breakMinutes: 60
+    },
+    {
+      id: 'p2',
+      positionName: 'ホール',
+      minEmployees: 2,
+      maxEmployees: 4,
+      preferredStartTime: '09:00',
+      preferredEndTime: '21:00',
+      breakMinutes: 60
+    },
+    {
+      id: 'p3',
+      positionName: 'レジ',
+      minEmployees: 1,
+      maxEmployees: 2,
+      preferredStartTime: '09:00',
+      preferredEndTime: '21:00',
+      breakMinutes: 60
+    }
+  ])
+
+  const [shiftRules] = useState<ShiftRule>({
+    maxConsecutiveDays: 5,
     minRestHours: 11,
     preferredShiftPattern: 'mixed',
     avoidOvertime: true,
     balanceWorkload: true,
-    considerPreferences: true,
-            aiModel: 'gemini-1.5-pro',
-    temperature: 0.7
-  }
+    considerPreferences: true
+  })
 
+  const ruleSets = [
+    {
+      id: 'normal',
+      name: '通常期',
+      description: '標準的な人員配置',
+      lastUsed: '2025年1月',
+      color: 'blue'
+    },
+    {
+      id: 'busy',
+      name: '繁忙期',
+      description: '年末年始・GW・お盆の増員体制',
+      lastUsed: '2024年12月',
+      color: 'orange'
+    },
+    {
+      id: 'slow',
+      name: '閑散期',
+      description: '2月・6月の少人数体制',
+      lastUsed: '2024年6月',
+      color: 'green'
+    }
+  ]
 
+  const menuItems = [
+    { id: 'home', label: 'ホーム', icon: Home },
+    { id: 'shift', label: 'シフト作成', icon: Calendar },
+    { id: 'employees', label: '従業員管理', icon: Users },
+    { id: 'attendance', label: '勤怠管理', icon: Clock },
+    { id: 'settings', label: '設定', icon: Settings }
+  ]
 
-  const handlePositionToggle = (position: string) => {
-    setSelectedPositions(prev => 
-      prev.includes(position) 
-        ? prev.filter(p => p !== position)
-        : [...prev, position]
-    )
-  }
+  const steps = [
+    { number: 0, title: '希望確認', icon: UserCheck },
+    { number: 1, title: 'AI生成', icon: Sparkles },
+    { number: 2, title: '調整・確定', icon: Target }
+  ]
 
-  const handleRuleSetSelect = (ruleSetId: string) => {
-    setSelectedRuleSet(ruleSetId)
-    setCurrentStep(0)
-  }
+  // 希望提出率の計算
+  const submissionRate = Math.round(
+    (shiftRequests.filter(r => r.status !== 'unavailable').length / employees.length) * 100
+  )
 
+  // 平均希望時間の計算
+  const averagePreferredHours = Math.round(
+    shiftRequests
+      .filter(r => r.preferredStartTime && r.preferredEndTime)
+      .reduce((sum, r) => {
+        const start = new Date(`2000-01-01T${r.preferredStartTime}:00`)
+        const end = new Date(`2000-01-01T${r.preferredEndTime}:00`)
+        return sum + (end.getTime() - start.getTime()) / (1000 * 60 * 60)
+      }, 0) / shiftRequests.filter(r => r.preferredStartTime && r.preferredEndTime).length
+  )
+
+  // AIシフト生成
   const handleGenerateShifts = async () => {
-    setIsGenerating(true)
-    
+    setAiGenerating(true)
+    setAiError(null)
+
     try {
-      // 従業員の希望をAI用の形式に変換
-      const employeePreferences: EmployeePreference[] = []
-      Object.entries(shiftPreferences).forEach(([date, preferences]) => {
-        preferences.forEach(pref => {
-          const employee = employees.find(emp => emp.id === pref.employee_id)
-          if (employee) {
-            employeePreferences.push({
-              id: `${date}-${employee.id}`,
-              employeeId: employee.id,
-              employeeName: employee.name,
-              date,
-              status: pref.available ? 'available' : 'unavailable',
-              preferredStartTime: pref.preferred_start,
-              preferredEndTime: pref.preferred_end,
-              notes: pref.reason
-            })
-          }
-        })
-      })
+      // 環境変数からAPIキーを取得（実際の実装では適切な方法を使用）
+      const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || 'dummy-key'
+      
+      if (apiKey === 'dummy-key') {
+        throw new Error('Gemini APIキーが設定されていません')
+      }
 
-      // ポジション要件を設定
-      const positionRequirements: PositionRequirement[] = [
-        {
-          id: '1',
-          positionName: 'ホール',
-          minEmployees: 2,
-          maxEmployees: 4,
-          preferredStartTime: '09:00',
-          preferredEndTime: '17:00',
-          breakMinutes: 60
-        },
-        {
-          id: '2',
-          positionName: 'キッチン',
-          minEmployees: 1,
-          maxEmployees: 3,
-          preferredStartTime: '08:00',
-          preferredEndTime: '18:00',
-          breakMinutes: 60
-        },
-        {
-          id: '3',
-          positionName: 'レジ',
-          minEmployees: 1,
-          maxEmployees: 2,
-          preferredStartTime: '09:00',
-          preferredEndTime: '17:00',
-          breakMinutes: 60
-        }
-      ]
-
-      // AIシフト生成を実行
-      const generator = getAIShiftGenerator(process.env.NEXT_PUBLIC_GEMINI_API_KEY || 'demo-key')
+      const generator = getAIShiftGenerator(apiKey)
+      
       const result = await generator.generateShifts(
-        shiftPeriod?.name || '2025年2月',
-        employeePreferences,
+        selectedMonth,
+        shiftRequests,
         positionRequirements,
-        aiShiftRules
+        shiftRules
       )
 
       setGeneratedShifts(result.shifts)
-      setAiGenerationResult(result)
       setCurrentStep(2)
-      toast.success('AIシフト生成が完了しました！')
+      toast.success('シフトの生成が完了しました')
       
-      // 結果の詳細を表示
-      console.log('AI生成結果:', result)
-      
-    } catch (error) {
+    } catch (error: any) {
       console.error('AIシフト生成エラー:', error)
-      toast.error('AIシフト生成に失敗しました。しばらく時間をおいて再試行してください。')
+      
+      let errorMessage = 'シフト生成に失敗しました'
+      let shouldShowFallback = false
+      
+      // AIErrorの型チェック
+      if (error && typeof error === 'object' && error.type) {
+        // AIErrorの場合は型に基づいて処理
+        switch (error.type) {
+          case 'RATE_LIMIT':
+            errorMessage = `レート制限によりAPI呼び出しができません。${error.details?.retryAfter ? Math.ceil(error.details.retryAfter / 1000) : 60}秒後に再試行してください。`
+            shouldShowFallback = true
+            break
+          case 'QUOTA_EXCEEDED':
+            errorMessage = 'Gemini APIの利用制限に達しました。手動でシフトを作成するか、しばらく時間をおいて再試行してください。'
+            shouldShowFallback = true
+            break
+          case 'API_KEY_INVALID':
+            errorMessage = 'APIキーが無効です。設定を確認してください。'
+            break
+          case 'NETWORK_ERROR':
+            errorMessage = 'ネットワークエラーが発生しました。インターネット接続を確認してください。'
+            break
+          default:
+            errorMessage = error.message || 'シフト生成に失敗しました'
+            shouldShowFallback = true
+        }
+      } else {
+        // 通常のErrorオブジェクトの場合
+        if (error.message) {
+          if (error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED')) {
+            errorMessage = 'Gemini APIの利用制限に達しました。手動でシフトを作成するか、しばらく時間をおいて再試行してください。'
+            shouldShowFallback = true
+          } else if (error.message.includes('quota')) {
+            errorMessage = 'Gemini APIの利用制限に達しました。手動でシフトを作成するか、しばらく時間をおいて再試行してください。'
+            shouldShowFallback = true
+          } else if (error.message.includes('APIキー')) {
+            errorMessage = 'APIキーが設定されていません。管理者にお問い合わせください。'
+          } else {
+            errorMessage = `シフト生成エラー: ${error.message}`
+            shouldShowFallback = true
+          }
+        } else {
+          errorMessage = 'シフト生成に失敗しました。詳細なエラー情報がありません。'
+          shouldShowFallback = true
+        }
+      }
+      
+      setAiError(errorMessage)
+      toast.error(errorMessage)
+      
+      if (shouldShowFallback) {
+        setShowFallbackModal(true)
+      }
+      
     } finally {
-      setIsGenerating(false)
+      setAiGenerating(false)
     }
   }
 
-  const handleShiftEdit = (shift: GeneratedShift) => {
-    setEditingShift(shift)
-    setEditModalOpen(true)
+  // 手動シフト生成（フォールバック）
+  const handleManualShiftGeneration = () => {
+    const manualGenerated = generateManualShifts()
+    setManualShifts(manualGenerated)
+    setGeneratedShifts(manualGenerated)
+    setCurrentStep(2)
+    setShowFallbackModal(false)
+    toast.success('手動でシフトを生成しました')
   }
 
-  const handleShiftSave = (updatedShift: GeneratedShift) => {
-    setGeneratedShifts(prev => 
-      prev.map(s => s.id === updatedShift.id ? updatedShift : s)
-    )
-    setEditModalOpen(false)
-    toast.success('シフトを更新しました')
-  }
-
-  // シフト削除ハンドラー
-  const handleShiftDelete = (shift: GeneratedShift) => {
-    setGeneratedShifts(prev => prev.filter(s => s.id !== shift.id))
-    setEditModalOpen(false)
-    setEditingShift(null)
-    toast.success('シフトを削除しました')
-  }
-
-  // シフトコピーハンドラー
-  const handleShiftCopy = (shift: GeneratedShift) => {
-    const newShift: GeneratedShift = {
-      ...shift,
-      id: `copy-${Date.now()}`,
-      date: shift.date, // 同じ日付にコピー
-      reasoning: `${shift.reasoning} (コピー)`
-    }
-    setGeneratedShifts(prev => [...prev, newShift])
-    toast.success('シフトをコピーしました')
-  }
-
-  // 勤務時間計算関数
-  const calculateWorkHours = (startTime: string, endTime: string): number => {
-    const start = new Date(`2000-01-01T${startTime}:00`)
-    const end = new Date(`2000-01-01T${endTime}:00`)
+  // 手動シフト生成ロジック
+  const generateManualShifts = (): GeneratedShift[] => {
+    const shifts: GeneratedShift[] = []
+    const daysInMonth = new Date(2025, 1, 0).getDate() // 2月は28日
     
-    if (end < start) {
-      end.setDate(end.getDate() + 1) // 日をまたぐ場合
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = `2025-02-${String(day).padStart(2, '0')}`
+      
+      // 各ポジションに必要人数を配置
+      positionRequirements.forEach(req => {
+        const availableEmployees = employees.filter(emp => 
+          emp.positions.includes(req.id) && 
+          shiftRequests.find(r => r.employeeId === emp.id && r.date === date)?.status !== 'unavailable'
+        )
+        
+        const requiredCount = Math.min(req.minEmployees, availableEmployees.length)
+        
+        for (let i = 0; i < requiredCount; i++) {
+          if (availableEmployees[i]) {
+            shifts.push({
+              id: `manual-${date}-${req.id}-${i}`,
+              date,
+              employeeId: availableEmployees[i].id,
+              employeeName: availableEmployees[i].name,
+              positionId: req.id,
+              positionName: req.positionName,
+              startTime: req.preferredStartTime,
+              endTime: req.preferredEndTime,
+              breakMinutes: req.breakMinutes,
+              confidence: 0.6,
+              reasoning: '手動生成（AI利用不可）'
+            })
+          }
+        }
+      })
     }
     
-    const diffMs = end.getTime() - start.getTime()
-    return Math.round((diffMs / (1000 * 60 * 60)) * 100) / 100
+    return shifts
   }
 
-  const handleSaveDraft = () => {
-    toast.success('下書きを保存しました')
+  // シフトの保存
+  const handleSaveShifts = () => {
+    const shiftsToSave = generatedShifts.length > 0 ? generatedShifts : manualShifts
+    // 実際の実装ではデータベースに保存
+    console.log('保存するシフト:', shiftsToSave)
+    toast.success('シフトを保存しました')
   }
 
-  const handleFinalizeShifts = () => {
-    toast.success('シフトを確定しました！')
+  // CSV出力
+  const handleExportCSV = () => {
+    const shiftsToExport = generatedShifts.length > 0 ? generatedShifts : manualShifts
+    // 実際の実装ではCSVファイルを生成・ダウンロード
+    console.log('CSV出力:', shiftsToExport)
+    toast.success('CSVファイルを出力しました')
   }
 
-  const getSubmissionRate = () => {
-    const totalDays = 28
-    const submittedDays = Object.values(shiftPreferences).filter(prefs => 
-      prefs.some(pref => pref.available !== undefined)
-    ).length
-    return Math.round((submittedDays / totalDays) * 100)
-  }
-
-  const getDateRange = () => {
-    if (!shiftPeriod) return []
-    const start = new Date(shiftPeriod.start_date)
-    const end = new Date(shiftPeriod.end_date)
-    const dates = []
-    for (let d = start; d <= end; d.setDate(d.getDate() + 1)) {
-      dates.push(new Date(d).toISOString().split('T')[0])
-    }
-    return dates
-  }
-
-  // シフト確定ハンドラー
-  const handleConfirmShifts = () => {
-    if (generatedShifts.length === 0) {
-      toast.error('確定するシフトがありません')
-      return
-    }
-
-    if (!confirmationComment.trim()) {
-      toast.error('確定コメントを入力してください')
-      return
-    }
-
-    // シフト確定処理
-    setIsShiftsConfirmed(true)
-    toast.success('シフトを確定しました！従業員に通知されます。')
-    
-    // 確定後の処理（実際の実装ではAPI呼び出し）
-    console.log('シフト確定:', {
-      shifts: generatedShifts,
-      comment: confirmationComment,
-      confirmedAt: new Date().toISOString()
-    })
-  }
-
-  // シフト確定解除ハンドラー
-  const handleUnconfirmShifts = () => {
-    setIsShiftsConfirmed(false)
-    setConfirmationComment('')
-    toast.success('シフト確定を解除しました。編集可能になります。')
-  }
-
-  // 確定後のシフト保護チェック
-  const isShiftEditable = (shift: GeneratedShift) => {
-    return !isShiftsConfirmed
-  }
-
-  if (currentStep === -1) {
-    return (
-      <div className="container mx-auto p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold">シフト作成</h1>
-          <Button onClick={() => setCurrentStep(0)}>今月のシフトを作成</Button>
-        </div>
-
-        {/* 下書きパネル */}
-        <Card>
-          <CardHeader>
-            <CardTitle>下書き</CardTitle>
-            <CardDescription>保存された下書きがある場合は再開できます</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-between p-4 border rounded-lg">
-              <div>
-                <p className="font-medium">2025年2月-通常期-ホール</p>
-                <p className="text-sm text-gray-500">保存: 1/28 14:30</p>
-              </div>
-              <div className="space-x-2">
-                <Button variant="outline" size="sm">再開</Button>
-                <Button variant="destructive" size="sm">削除</Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* ポジション選択 */}
-        <Card>
-          <CardHeader>
-            <CardTitle>対象ポジション</CardTitle>
-            <CardDescription>シフト作成対象のポジションを選択してください</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* ヘッダー */}
+      <header className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center">
               <Button
-                variant={selectedPositions.length === 0 ? "default" : "outline"}
-                onClick={() => setSelectedPositions([])}
-              >
-                全ポジション
-              </Button>
-              {positions.map(position => (
-                <Button
-                  key={position}
-                  variant={selectedPositions.includes(position) ? "default" : "outline"}
-                  onClick={() => handlePositionToggle(position)}
-                >
-                  {position}
-                </Button>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* ルールセット選択 */}
-        <Card>
-          <CardHeader>
-            <CardTitle>ルールセット選択</CardTitle>
-            <CardDescription>シフト作成に適用するルールを選択してください</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {ruleSets.map(ruleSet => (
-                <Card key={ruleSet.id} className="cursor-pointer hover:shadow-md transition-shadow">
-                  <CardContent className="p-4">
-                    <div className={`w-4 h-4 rounded-full ${ruleSet.color} mb-3`}></div>
-                    <h3 className="font-semibold text-lg mb-2">{ruleSet.name}</h3>
-                    <p className="text-sm text-gray-600 mb-4">{ruleSet.description}</p>
-                    <Button 
-                      className="w-full"
-                      onClick={() => handleRuleSetSelect(ruleSet.id)}
-                    >
-                      選択
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  if (currentStep === 0) {
-    return (
-      <div className="container mx-auto p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">シフト希望確認</h1>
-            <p className="text-gray-600">従業員のシフト希望提出状況を確認してください</p>
-          </div>
-          <div className="space-x-2">
-            <Button variant="outline" onClick={() => setCurrentStep(-1)}>戻る</Button>
-            <Button onClick={() => setCurrentStep(1)}>次へ</Button>
-          </div>
-        </div>
-
-        {/* 提出状況サマリー */}
-        <Card>
-          <CardHeader>
-            <CardTitle>提出状況サマリー</CardTitle>
-            <CardDescription>対象期間: {shiftPeriod?.start_date} 〜 {shiftPeriod?.end_date}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-4 mb-4">
-              <div className="text-2xl font-bold">{getSubmissionRate()}%</div>
-              <div className="flex-1 bg-gray-200 rounded-full h-2">
-                <div 
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${getSubmissionRate()}%` }}
-                ></div>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-blue-600">{employees.length}</div>
-                <div className="text-sm text-gray-600">対象従業員</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-green-600">{getSubmissionRate()}%</div>
-                <div className="text-sm text-gray-600">提出率</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-orange-600">28日</div>
-                <div className="text-sm text-gray-600">対象期間</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-purple-600">{selectedPositions.length || '全'}</div>
-                <div className="text-sm text-gray-600">対象ポジション</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* 従業員×日付マトリクス */}
-        <Card>
-          <CardHeader>
-            <CardTitle>従業員別希望提出状況</CardTitle>
-            <CardDescription>各従業員の日別希望を確認できます</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr>
-                    <th className="border p-2 bg-gray-50 sticky left-0 z-10">従業員</th>
-                    {getDateRange().map(date => (
-                      <th key={date} className="border p-2 bg-gray-50 text-xs">
-                        {new Date(date).getDate()}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {employees.map(employee => (
-                    <tr key={employee.id}>
-                      <td className="border p-2 bg-gray-50 sticky left-0 z-10 font-medium">
-                        {employee.name}
-                      </td>
-                      {getDateRange().map(date => {
-                        const preference = shiftPreferences[date]?.find(p => p.date === date)
-                        const isAvailable = preference?.available
-                        const hasPreference = preference !== undefined
-                        
-                        return (
-                          <td key={date} className="border p-2 text-center">
-                            {hasPreference ? (
-                              <div className={`w-4 h-4 mx-auto rounded-full ${
-                                isAvailable ? 'bg-green-500' : 'bg-red-500'
-                              }`}></div>
-                            ) : (
-                              <div className="w-4 h-4 mx-auto rounded-full bg-gray-300"></div>
-                            )}
-                          </td>
-                        )
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="mt-4 flex justify-between items-center">
-              <div className="text-sm text-gray-600">
-                <span className="inline-block w-4 h-4 bg-green-500 rounded-full mr-2"></span>勤務可能
-                <span className="inline-block w-4 h-4 bg-red-500 rounded-full mx-4 mr-2"></span>勤務不可
-                <span className="inline-block w-4 h-4 bg-gray-300 rounded-full mx-4 mr-2"></span>未提出
-              </div>
-              <Button variant="outline">CSV出力</Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  if (currentStep === 1) {
-    return (
-      <div className="container mx-auto p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">AIシフト生成</h1>
-            <p className="text-gray-600">従業員の希望と店舗の要件を考慮してシフトを生成します</p>
-          </div>
-          <div className="space-x-2">
-            <Button variant="outline" onClick={() => setCurrentStep(0)}>戻る</Button>
-          </div>
-        </div>
-
-        {/* 生成設定サマリー */}
-        <Card>
-          <CardHeader>
-            <CardTitle>生成設定</CardTitle>
-            <CardDescription>以下の設定でシフトを生成します</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <h3 className="font-semibold mb-3">基本設定</h3>
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span>対象期間:</span>
-                    <span>{shiftPeriod?.start_date} 〜 {shiftPeriod?.end_date}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>対象ポジション:</span>
-                    <span>{selectedPositions.length > 0 ? selectedPositions.join(', ') : '全ポジション'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>ルールセット:</span>
-                    <span>{ruleSets.find(r => r.id === selectedRuleSet)?.name}</span>
-                  </div>
-                </div>
-              </div>
-              <div>
-                <h3 className="font-semibold mb-3">従業員状況</h3>
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span>対象従業員:</span>
-                    <span>{employees.length}名</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>希望提出率:</span>
-                    <span>{getSubmissionRate()}%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>平均希望時間:</span>
-                    <span>8時間</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* 生成ボタン */}
-        <Card>
-          <CardContent className="p-6 text-center">
-            <div className="mb-6">
-              <h3 className="text-xl font-semibold mb-2">シフトを生成しますか？</h3>
-              <p className="text-gray-600">従業員の希望、ポジション別必要人数、労働時間制限を考慮して最適なシフトを生成します</p>
-            </div>
-            <Button 
-              size="lg" 
-              onClick={handleGenerateShifts}
-              disabled={isGenerating}
-              className="px-8"
-            >
-              {isGenerating ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  生成中...
-                </>
-              ) : (
-                'シフトを生成'
-              )}
-            </Button>
-            {isGenerating && (
-              <p className="text-sm text-gray-500 mt-2">通常1-3分程度かかります</p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  if (currentStep === 2) {
-    return (
-      <div className="container mx-auto p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">シフト調整・確定</h1>
-            <p className="text-gray-600">生成されたシフトを確認・調整して確定してください</p>
-          </div>
-          
-          {/* シフト確定状態表示 */}
-          {isShiftsConfirmed && (
-            <div className="flex items-center space-x-2">
-              <Badge variant="default" className="bg-green-600">
-                ✅ 確定済み
-              </Badge>
-              <Button 
-                variant="outline" 
+                variant="ghost"
                 size="sm"
-                onClick={handleUnconfirmShifts}
+                onClick={() => router.push('/admin/home')}
+                className="mr-4"
               >
-                確定解除
+                <ChevronLeft className="h-4 w-4 mr-2" />
+                管理者ホーム
               </Button>
+              <h1 className="text-xl font-semibold text-gray-900">シフト作成</h1>
+            </div>
+            <div className="flex items-center space-x-4">
+              <span className="text-sm text-gray-700">{selectedStore.name}</span>
+              <Button
+                variant="outline"
+                onClick={() => router.push('/admin/home')}
+              >
+                ログアウト
+              </Button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* メインコンテンツ */}
+      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        <div className="px-4 py-6 sm:px-0">
+          {/* ステップインジケーター */}
+          <div className="mb-8">
+            <div className="flex items-center justify-center space-x-4">
+              {steps.map((step, index) => (
+                <div key={step.number} className="flex items-center">
+                  <div className={`flex items-center justify-center w-10 h-10 rounded-full border-2 ${
+                    index <= currentStep 
+                      ? 'bg-blue-600 border-blue-600 text-white' 
+                      : 'bg-gray-200 border-gray-300 text-gray-500'
+                  }`}>
+                    {index < currentStep ? (
+                      <CheckCircle className="w-6 h-6" />
+                    ) : (
+                      <step.icon className="w-6 h-6" />
+                    )}
+                  </div>
+                  <span className={`ml-2 text-sm font-medium ${
+                    index <= currentStep ? 'text-blue-600' : 'text-gray-500'
+                  }`}>
+                    {step.title}
+                  </span>
+                  {index < steps.length - 1 && (
+                    <ChevronRight className="w-5 h-5 text-gray-300 mx-2" />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Step 0: 初期設定 */}
+          {currentStep === 0 && (
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>シフト作成設定</CardTitle>
+                  <CardDescription>
+                    対象期間とルールセットを選択してください
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <Label htmlFor="month">対象期間</Label>
+                      <Input
+                        id="month"
+                        type="month"
+                        value={selectedMonth}
+                        onChange={(e) => setSelectedMonth(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="position">対象ポジション</Label>
+                      <Select value={selectedPosition} onValueChange={setSelectedPosition}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="選択してください" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">全ポジション</SelectItem>
+                          {positionRequirements.map(pos => (
+                            <SelectItem key={pos.id} value={pos.id}>
+                              {pos.positionName}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label htmlFor="ruleSet">ルールセット</Label>
+                      <Select value={selectedRuleSet} onValueChange={setSelectedRuleSet}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="選択してください" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ruleSets.map(rule => (
+                            <SelectItem key={rule.id} value={rule.id}>
+                              {rule.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <Button onClick={() => setCurrentStep(1)}>
+                      次へ進む
+                      <ChevronRight className="w-4 h-4 ml-2" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Step 1: 希望確認 */}
+          {currentStep === 1 && (
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>従業員の希望確認</CardTitle>
+                  <CardDescription>
+                    シフト希望の提出状況を確認してください
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div className="text-center p-4 bg-blue-50 rounded-lg">
+                      <div className="text-2xl font-bold text-blue-600">{employees.length}名</div>
+                      <div className="text-sm text-blue-600">対象従業員</div>
+                    </div>
+                    <div className="text-center p-4 bg-green-50 rounded-lg">
+                      <div className="text-2xl font-bold text-green-600">{submissionRate}%</div>
+                      <div className="text-sm text-green-600">希望提出率</div>
+                    </div>
+                    <div className="text-center p-4 bg-purple-50 rounded-lg">
+                      <div className="text-2xl font-bold text-purple-600">{averagePreferredHours}h</div>
+                      <div className="text-sm text-purple-600">平均希望時間</div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex justify-between items-center mb-4">
+                    <Button variant="outline" onClick={() => setCurrentStep(0)}>
+                      <ChevronLeft className="w-4 h-4 mr-2" />
+                      戻る
+                    </Button>
+                    <Button onClick={() => setCurrentStep(2)}>
+                      次へ進む
+                      <ChevronRight className="w-4 h-4 ml-2" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Step 2: AI生成 */}
+          {currentStep === 2 && (
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>AIシフト生成</CardTitle>
+                  <CardDescription>
+                    従業員の希望と店舗の要件を考慮してシフトを生成します
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="mb-6">
+                    <Button variant="outline" onClick={() => setCurrentStep(1)}>
+                      <ChevronLeft className="w-4 h-4 mr-2" />
+                      戻る
+                    </Button>
+                  </div>
+
+                  <div className="bg-gray-50 p-6 rounded-lg mb-6">
+                    <h3 className="text-lg font-semibold mb-4">生成設定</h3>
+                    <p className="text-sm text-gray-600 mb-4">
+                      以下の設定でシフトを生成します
+                    </p>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                      <div>
+                        <Label className="text-sm font-medium">基本設定</Label>
+                        <div className="mt-2 space-y-2 text-sm">
+                          <div>対象期間: {selectedMonth}</div>
+                          <div>対象ポジション: {selectedPosition === 'all' ? '全ポジション' : positionRequirements.find(p => p.id === selectedPosition)?.positionName}</div>
+                          <div>ルールセット: {ruleSets.find(r => r.id === selectedRuleSet)?.name}</div>
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium">従業員状況</Label>
+                        <div className="mt-2 space-y-2 text-sm">
+                          <div>対象従業員: {employees.length}名</div>
+                          <div>希望提出率: {submissionRate}%</div>
+                          <div>平均希望時間: {averagePreferredHours}時間</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {aiError && (
+                      <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                        <div className="flex items-center">
+                          <AlertCircleIcon className="w-5 h-5 text-red-500 mr-2" />
+                          <div className="text-red-700">
+                            <div className="font-medium">AI生成エラー</div>
+                            <div className="text-sm">{aiError}</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="text-center">
+                      <p className="text-sm text-gray-600 mb-4">
+                        従業員の希望、ポジション別必要人数、労働時間制限を考慮して最適なシフトを生成します
+                      </p>
+                      
+                      {!aiError ? (
+                        <Button 
+                          onClick={handleGenerateShifts}
+                          disabled={aiGenerating}
+                          className="w-full max-w-md"
+                        >
+                          {aiGenerating ? (
+                            <>
+                              <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                              生成中...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-4 h-4 mr-2" />
+                              シフトを生成
+                            </>
+                          )}
+                        </Button>
+                      ) : (
+                        <div className="space-y-2">
+                          <Button 
+                            onClick={handleGenerateShifts}
+                            disabled={aiGenerating}
+                            variant="outline"
+                            className="w-full max-w-md"
+                          >
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            再試行
+                          </Button>
+                          <Button 
+                            onClick={() => setShowFallbackModal(true)}
+                            variant="outline"
+                            className="w-full max-w-md"
+                          >
+                            <Edit3 className="w-4 h-4 mr-2" />
+                            手動生成
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Step 3: 調整・確定 */}
+          {currentStep === 3 && (
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>シフト調整・確定</CardTitle>
+                  <CardDescription>
+                    生成されたシフトを確認・調整して確定してください
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="mb-6">
+                    <Button variant="outline" onClick={() => setCurrentStep(2)}>
+                      <ChevronLeft className="w-4 h-4 mr-2" />
+                      戻る
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div>
+                      <h3 className="text-lg font-semibold mb-4">シフト表</h3>
+                      <div className="bg-white border rounded-lg p-4">
+                        <div className="text-sm text-gray-600 mb-4">
+                          生成されたシフト: {generatedShifts.length}件
+                        </div>
+                        {/* シフト表の表示（簡略化） */}
+                        <div className="space-y-2">
+                          {generatedShifts.slice(0, 5).map((shift) => (
+                            <div key={shift.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                              <div>
+                                <div className="font-medium">{shift.employeeName}</div>
+                                <div className="text-sm text-gray-600">{shift.date} {shift.startTime}-{shift.endTime}</div>
+                              </div>
+                              <Badge variant="outline">{shift.positionName}</Badge>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <h3 className="text-lg font-semibold mb-4">操作</h3>
+                      <div className="space-y-3">
+                        <Button onClick={handleSaveShifts} className="w-full">
+                          <Save className="w-4 h-4 mr-2" />
+                          下書き保存
+                        </Button>
+                        <Button onClick={handleExportCSV} variant="outline" className="w-full">
+                          <Download className="w-4 h-4 mr-2" />
+                          CSV出力
+                        </Button>
+                        <Button variant="outline" className="w-full">
+                          <CheckCircle className="w-4 h-4 mr-2" />
+                          シフト確定
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           )}
         </div>
+      </main>
 
-        {/* 確定状態の警告 */}
-        {isShiftsConfirmed && (
-          <Card className="border-orange-200 bg-orange-50">
-            <CardContent className="pt-6">
-              <div className="flex items-center space-x-2 text-orange-800">
-                <span className="text-lg">⚠️</span>
-                <div>
-                  <p className="font-medium">シフトが確定されています</p>
-                  <p className="text-sm">編集する場合は先に確定解除を行ってください</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* AI生成結果サマリー */}
-        {aiGenerationResult && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                シフト調整・確定
-                <div className="flex items-center space-x-2">
-                  <Badge variant="outline">
-                    AI信頼度: {aiGenerationResult.summary.averageConfidence}%
-                  </Badge>
-                </div>
-              </CardTitle>
-              <CardDescription>
-                生成されたシフトを調整し、確定してください
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* AI生成結果サマリー */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Card>
-                  <CardContent className="pt-4">
-                    <div className="text-2xl font-bold text-green-600">
-                      {aiGenerationResult.summary.totalShifts}
-                    </div>
-                    <div className="text-sm text-muted-foreground">生成シフト数</div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-4">
-                    <div className="text-2xl font-bold text-blue-600">
-                      {aiGenerationResult.summary.preferenceSatisfaction}%
-                    </div>
-                    <div className="text-sm text-muted-foreground">従業員満足度</div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-4">
-                    <div className="text-2xl font-bold text-purple-600">
-                      {aiGenerationResult.summary.ruleCompliance}%
-                    </div>
-                    <div className="text-sm text-muted-foreground">ルール準拠率</div>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* 警告・提案 */}
-              <div className="space-y-3">
-                {aiGenerationResult.warnings.length > 0 && (
-                  <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                    <h4 className="font-medium text-yellow-800 mb-2">⚠️ 注意事項</h4>
-                    <ul className="text-sm text-yellow-700 space-y-1">
-                      {aiGenerationResult.warnings.map((warning, index) => (
-                        <li key={index}>• {warning}</li>
-                      ))}
-                    </ul>
+      {/* フォールバックモーダル */}
+      <Dialog open={showFallbackModal} onOpenChange={setShowFallbackModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>AI生成が利用できません</DialogTitle>
+            <DialogDescription>
+              Gemini APIの利用制限により、AIによる自動生成ができません。
+              代替手段を選択してください。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-center">
+                <Info className="w-5 h-5 text-blue-500 mr-2" />
+                <div className="text-blue-700">
+                  <div className="font-medium">手動生成</div>
+                  <div className="text-sm">
+                    従業員の希望とポジション要件に基づいて、基本的なシフトを自動生成します。
                   </div>
-                )}
-                
-                {aiGenerationResult.suggestions.length > 0 && (
-                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                    <h4 className="font-medium text-blue-800 mb-2">💡 改善提案</h4>
-                    <ul className="text-sm text-blue-700 space-y-1">
-                      {aiGenerationResult.suggestions.map((suggestion, index) => (
-                        <li key={index}>• {suggestion}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* ビュータブ */}
-        <Card>
-          <CardHeader>
-            <CardTitle>シフト表示</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Tabs defaultValue="shifts" className="w-full">
-              <TabsList className="grid w-full grid-cols-4">
-                <TabsTrigger value="shifts">シフト表</TabsTrigger>
-                <TabsTrigger value="staffing">人員配置</TabsTrigger>
-                <TabsTrigger value="summary">サマリー</TabsTrigger>
-                <TabsTrigger value="calendar">カレンダー</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="shifts" className="space-y-4">
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse border border-gray-200">
-                    <thead>
-                      <tr className="bg-gray-50">
-                        <th className="border border-gray-200 p-2 text-left">従業員</th>
-                        {Array.from({ length: 28 }, (_, i) => (
-                          <th key={i + 1} className="border border-gray-200 p-2 text-center">
-                            {i + 1}日
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {employees.map((emp) => (
-                        <tr key={emp.id}>
-                          <td className="border border-gray-200 p-2 font-medium">
-                            {emp.name}
-                          </td>
-                          {Array.from({ length: 28 }, (_, i) => {
-                            const shift = generatedShifts.find(
-                              s => s.employeeId === emp.id && s.date === `2025-02-${String(i + 1).padStart(2, '0')}`
-                            )
-                            return (
-                              <td 
-                                key={i + 1} 
-                                className={`border border-gray-200 p-2 text-center cursor-pointer hover:bg-gray-50 ${
-                                  shift ? 'bg-blue-50' : ''
-                                } ${shift && !isShiftEditable(shift) ? 'opacity-50' : ''}`}
-                                onClick={() => shift && isShiftEditable(shift) && handleShiftEdit(shift)}
-                              >
-                                {shift ? (
-                                  <div className="text-xs">
-                                    <div className="font-medium">{shift.startTime}</div>
-                                    <div className="text-gray-500">{shift.endTime}</div>
-                                    <div className="text-gray-400">{shift.positionName}</div>
-                                  </div>
-                                ) : (
-                                  <span className="text-gray-300">-</span>
-                                )}
-                              </td>
-                            )
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
                 </div>
-              </TabsContent>
-
-              <TabsContent value="staffing" className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {positions.map((position) => (
-                    <Card key={position}>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-lg flex items-center space-x-2">
-                          <div 
-                            className="w-4 h-4 rounded-full bg-blue-500"
-                          ></div>
-                          <span>{position}</span>
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="space-y-2">
-                          {Array.from({ length: 28 }, (_, i) => {
-                            const dayShifts = generatedShifts.filter(
-                              s => s.date === `2025-02-${String(i + 1).padStart(2, '0')}` && 
-                                   s.positionName === position
-                            )
-                            const requiredCount = 2 // モックデータ
-                            return (
-                              <div key={i + 1} className="flex justify-between text-sm">
-                                <span>{i + 1}日</span>
-                                <span className={`font-medium ${
-                                  dayShifts.length >= requiredCount ? 'text-green-600' : 'text-red-600'
-                                }`}>
-                                  {dayShifts.length}/{requiredCount}名
-                                </span>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </TabsContent>
-
-              <TabsContent value="summary" className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-lg">従業員別勤務時間</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2">
-                        {employees.map((emp) => {
-                          const empShifts = generatedShifts.filter(s => s.employeeId === emp.id)
-                          const totalHours = empShifts.reduce((total, shift) => {
-                            const start = new Date(`2000-01-01T${shift.startTime}:00`)
-                            const end = new Date(`2000-01-01T${shift.endTime}:00`)
-                            if (end < start) end.setDate(end.getDate() + 1)
-                            const hours = (end.getTime() - start.getTime()) / (1000 * 60 * 60)
-                            return total + hours - (shift.breakMinutes / 60)
-                          }, 0)
-                          
-                          return (
-                            <div key={emp.id} className="flex justify-between">
-                              <span>{emp.name}</span>
-                              <span className="font-medium">{totalHours.toFixed(1)}時間</span>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-lg">日別必要人数</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2">
-                        {Array.from({ length: 28 }, (_, i) => {
-                          const day = i + 1
-                          const totalRequired = positions.length * 2 // 各ポジション2名必要
-                          const totalAssigned = generatedShifts.filter(
-                            s => s.date === `2025-02-${String(i + 1).padStart(2, '0')}`
-                          ).length
-                          
-                          return (
-                            <div key={day} className="flex justify-between">
-                              <span>{day}日</span>
-                              <span className={`font-medium ${
-                                totalAssigned >= totalRequired ? 'text-green-600' : 'text-red-600'
-                              }`}>
-                                {totalAssigned}/{totalRequired}名
-                              </span>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="calendar" className="space-y-4">
-                <ShiftCalendar
-                  shifts={generatedShifts}
-                  onShiftClick={(shift) => {
-                    if (isShiftEditable(shift)) {
-                      handleShiftEdit(shift)
-                    }
-                  }}
-                  onDateClick={(date) => {
-                    setSelectedDate(date)
-                  }}
-                  isEditable={!isShiftsConfirmed}
-                />
-              </TabsContent>
-            </Tabs>
-          </CardContent>
-        </Card>
-
-        {/* 確定コメント入力 */}
-        <Card>
-          <CardHeader>
-            <CardTitle>シフト確定</CardTitle>
-            <CardDescription>
-              シフトを確定する前にコメントを入力してください
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="confirmation-comment">確定コメント</Label>
-              <Textarea
-                id="confirmation-comment"
-                placeholder="シフト確定時のコメントを入力してください（例：2月シフト確定、従業員希望を最大限考慮）"
-                value={confirmationComment}
-                onChange={(e) => setConfirmationComment(e.target.value)}
-                disabled={isShiftsConfirmed}
-              />
-            </div>
-
-            {/* アクションボタン */}
-            <div className="flex justify-between items-center">
-              <div className="flex space-x-2">
-                <Button
-                  variant="outline"
-                  onClick={() => setCurrentStep(1)}
-                  disabled={isShiftsConfirmed}
-                >
-                  戻る
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={handleGenerateShifts}
-                  disabled={isShiftsConfirmed}
-                >
-                  再生成
-                </Button>
-              </div>
-              
-              <div className="flex space-x-2">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    // 下書き保存処理
-                    toast.success('下書きを保存しました')
-                  }}
-                  disabled={isShiftsConfirmed}
-                >
-                  下書き保存
-                </Button>
-                
-                {!isShiftsConfirmed ? (
-                  <Button
-                    onClick={handleConfirmShifts}
-                    disabled={!confirmationComment.trim() || generatedShifts.length === 0}
-                    className="bg-green-600 hover:bg-green-700"
-                  >
-                    🎯 シフト確定
-                  </Button>
-                ) : (
-                  <Button
-                    variant="outline"
-                    onClick={handleUnconfirmShifts}
-                    className="border-orange-500 text-orange-600 hover:bg-orange-50"
-                  >
-                    🔓 確定解除
-                  </Button>
-                )}
               </div>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* シフト編集モーダル */}
-        <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
-          <DialogContent className="max-w-4xl">
-            <DialogHeader>
-              <DialogTitle>
-                シフト編集 - {editingShift?.employeeName}
-              </DialogTitle>
-              <DialogDescription>
-                {editingShift?.date} | AI信頼度: {editingShift?.confidence}%
-              </DialogDescription>
-            </DialogHeader>
             
-            {editingShift && (
-              <div className="grid grid-cols-3 gap-4">
-                {/* 基本情報 */}
-                <div className="space-y-4">
-                  <div>
-                    <Label>従業員</Label>
-                    <Select 
-                      value={editingShift.employeeId} 
-                      onValueChange={(value) => setEditingShift({
-                        ...editingShift,
-                        employeeId: value,
-                        employeeName: employees.find(emp => emp.id === value)?.name || ''
-                      })}
-                      disabled={!isShiftEditable(editingShift)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {employees.map((emp) => (
-                          <SelectItem key={emp.id} value={emp.id}>
-                            {emp.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <div className="flex items-center">
+                <AlertTriangle className="w-5 h-5 text-yellow-500 mr-2" />
+                <div className="text-yellow-700">
+                  <div className="font-medium">制限について</div>
+                  <div className="text-sm">
+                    Gemini APIの無料枠の利用制限に達しています。以下の対処法があります：
                   </div>
-                  
-                  <div>
-                    <Label>ポジション</Label>
-                    <Select 
-                      value={editingShift.positionName} 
-                      onValueChange={(value) => setEditingShift({
-                        ...editingShift,
-                        positionName: value
-                      })}
-                      disabled={!isShiftEditable(editingShift)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {positions.map((pos) => (
-                          <SelectItem key={pos} value={pos}>
-                            {pos}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  
-                  <div>
-                    <Label>開始時間</Label>
-                    <Input
-                      type="time"
-                      value={editingShift.startTime}
-                      onChange={(e) => setEditingShift({
-                        ...editingShift,
-                        startTime: e.target.value
-                      })}
-                      disabled={!isShiftEditable(editingShift)}
-                    />
-                  </div>
-                  
-                  <div>
-                    <Label>終了時間</Label>
-                    <Input
-                      type="time"
-                      value={editingShift.endTime}
-                      onChange={(e) => setEditingShift({
-                        ...editingShift,
-                        endTime: e.target.value
-                      })}
-                      disabled={!isShiftEditable(editingShift)}
-                    />
-                  </div>
-                  
-                  <div>
-                    <Label>休憩時間（分）</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      max="120"
-                      value={editingShift.breakMinutes}
-                      onChange={(e) => setEditingShift({
-                        ...editingShift,
-                        breakMinutes: parseInt(e.target.value) || 0
-                      })}
-                      disabled={!isShiftEditable(editingShift)}
-                    />
-                  </div>
+                  <ul className="text-sm mt-2 space-y-1 list-disc list-inside">
+                    <li>有料プランへの移行を検討</li>
+                    <li>翌日まで待機して再試行</li>
+                    <li>手動生成モードを使用</li>
+                  </ul>
                 </div>
+              </div>
+            </div>
 
-                {/* 勤務時間計算 */}
-                <div className="space-y-4">
-                  <h3 className="font-medium text-lg">勤務時間計算</h3>
-                  
-                  <div className="space-y-3">
-                    <div className="flex justify-between p-3 bg-gray-50 rounded-lg">
-                      <span>総勤務時間</span>
-                      <span className="font-medium">
-                        {calculateWorkHours(editingShift.startTime, editingShift.endTime)}時間
-                      </span>
-                    </div>
-                    
-                    <div className="flex justify-between p-3 bg-blue-50 rounded-lg">
-                      <span>実働時間</span>
-                      <span className="font-medium">
-                        {calculateWorkHours(editingShift.startTime, editingShift.endTime) - (editingShift.breakMinutes / 60)}時間
-                      </span>
-                    </div>
-                    
-                    <div className="flex justify-between p-3 bg-orange-50 rounded-lg">
-                      <span>残業時間</span>
-                      <span className="font-medium">
-                        {Math.max(0, calculateWorkHours(editingShift.startTime, editingShift.endTime) - (editingShift.breakMinutes / 60) - 8)}時間
-                      </span>
-                    </div>
-                  </div>
-                  
-                  <div className="p-3 bg-yellow-50 rounded-lg">
-                    <h4 className="font-medium mb-2">AI生成理由</h4>
-                    <Textarea
-                      value={editingShift.reasoning}
-                      onChange={(e) => setEditingShift({
-                        ...editingShift,
-                        reasoning: e.target.value
-                      })}
-                      disabled={!isShiftEditable(editingShift)}
-                      placeholder="AIがこのシフトを生成した理由..."
-                    />
-                  </div>
-                </div>
-
-                {/* アクションボタン */}
-                <div className="space-y-4">
-                  <h3 className="font-medium text-lg">アクション</h3>
-                  
-                  <div className="space-y-2">
-                    <Button
-                      variant="destructive"
-                      className="w-full"
-                      onClick={() => handleShiftDelete(editingShift)}
-                      disabled={!isShiftEditable(editingShift)}
-                    >
-                      🗑️ 削除
-                    </Button>
-                    
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => handleShiftCopy(editingShift)}
-                      disabled={!isShiftEditable(editingShift)}
-                    >
-                      📋 コピー
-                    </Button>
-                    
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => setEditModalOpen(false)}
-                    >
-                      ❌ キャンセル
-                    </Button>
-                    
-                    <Button
-                      className="w-full"
-                      onClick={() => handleShiftSave(editingShift)}
-                      disabled={!isShiftEditable(editingShift)}
-                    >
-                      💾 保存
-                    </Button>
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <div className="flex items-center">
+                <CheckCircle className="w-5 h-4 mr-2" />
+                <div className="text-green-700">
+                  <div className="font-medium">手動生成の特徴</div>
+                  <div className="text-sm">
+                    • 従業員の希望を最大限考慮<br/>
+                    • ポジション別必要人数を充足<br/>
+                    • 基本的な労働時間制限を遵守<br/>
+                    • 生成後も自由に調整可能
                   </div>
                 </div>
               </div>
-            )}
-          </DialogContent>
-        </Dialog>
-      </div>
-    )
-  }
+            </div>
 
-  return null
+            <div className="flex space-x-2">
+              <Button variant="outline" onClick={() => setShowFallbackModal(false)}>
+                キャンセル
+              </Button>
+              <Button onClick={handleManualShiftGeneration} className="flex-1">
+                <Edit3 className="w-4 h-4 mr-2" />
+                手動生成を使用
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
 }
+
+export default ShiftCreatePage

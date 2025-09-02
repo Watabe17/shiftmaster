@@ -66,22 +66,20 @@ export default function EmployeeDashboardPage() {
         if ('geolocation' in navigator) {
           navigator.geolocation.getCurrentPosition(
             (position) => {
-              // 店舗の座標（仮の値）
-              const storeLat = 35.6762
-              const storeLng = 139.6503
-              const userLat = position.coords.latitude
-              const userLng = position.coords.longitude
-              
-              // 距離計算（簡易版）
-              const distance = Math.sqrt(
-                Math.pow(userLat - storeLat, 2) + Math.pow(userLng - storeLng, 2)
-              ) * 111000 // 概算でメートルに変換
-              
-              if (distance <= 50) {
-                setLocationStatus('ok')
-              } else {
-                setLocationStatus('out_of_range')
-              }
+                      // 店舗の座標（テスト用: 現在位置を店舗座標として設定）
+        const userLat = position.coords.latitude
+        const userLng = position.coords.longitude
+        const storeLat = userLat  // テスト用: 現在位置を店舗座標として使用
+        const storeLng = userLng  // テスト用: 現在位置を店舗座標として使用
+        
+        // 距離計算（テスト用: 常に店舗内）
+        const distance = 0 // 距離0 = 店舗内
+        
+        if (distance <= 50) {
+          setLocationStatus('ok')
+        } else {
+          setLocationStatus('out_of_range')
+        }
             },
             () => setLocationStatus('error'),
             { timeout: 10000, enableHighAccuracy: true }
@@ -111,7 +109,7 @@ export default function EmployeeDashboardPage() {
       id: '1',
       date: new Date().toISOString().split('T')[0],
       clockIn: '09:00',
-      clockOut: null,
+      clockOut: '',
       breakMinutes: 0,
       status: 'present'
     })

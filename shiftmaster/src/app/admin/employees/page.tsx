@@ -1,22 +1,21 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Calendar, Users, ChevronLeft, Menu, LogOut, Settings, Clock, Home,
-  Search, Plus, Edit2, Trash2, UserPlus, FileText, Download, Upload,
-  Filter, X, Check, AlertCircle, ChevronDown, MoreVertical,
-  Mail, Phone, Shield, Building, CalendarDays, Info, AlertTriangle,
-  FileCheck, CreditCard, UserCheck, Briefcase, User
+  UserPlus, Search, Filter, Download, Upload, MoreHorizontal, Edit2,
+  Trash2, Mail, FileText, User, Eye, EyeOff
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 
 // 従業員の型定義
 interface Employee {
@@ -142,6 +141,64 @@ const EmployeeManagementPage = () => {
       address: '東京都新宿区〇〇3-4-5'
     }
   ])
+
+  // データベース連携用の状態
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // データベースから従業員一覧を取得
+  const fetchEmployees = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      
+      const response = await fetch('/api/employees?storeId=24827f88-3b69-4548-aa9c-d26db7bc417c')
+      if (!response.ok) {
+        throw new Error('従業員データの取得に失敗しました')
+      }
+      
+      const result = await response.json()
+      if (result.success && result.data.length > 0) {
+        // データベースから取得したデータを変換
+        const dbEmployees = result.data.map((dbEmp: any) => ({
+          id: dbEmp.id,
+          employeeCode: dbEmp.employeeCode,
+          name: dbEmp.fullName,
+          kana: dbEmp.fullName,
+          employment_type: dbEmp.role === 'MANAGER' || dbEmp.role === 'ADMIN' || dbEmp.role === 'SYSTEM_ADMIN' ? 'full_time' : 'part_time',
+          positions: dbEmp.position ? [dbEmp.position.id] : ['hall'],
+          role: dbEmp.role.toLowerCase(),
+          authStatus: dbEmp.status.toLowerCase(),
+          hire_date: dbEmp.hireDate ? new Date(dbEmp.hireDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+          contract_end: null,
+          is_active: dbEmp.status === 'ACTIVE',
+          email: dbEmp.email || dbEmp.userProfile?.email || '',
+          phone: dbEmp.phone || dbEmp.userProfile?.phone || '',
+          paid_leave: { total: dbEmp.paidLeaveDays || 0, used: 0, remaining: dbEmp.paidLeaveDays || 0 },
+          social_insurance: { health: dbEmp.socialInsuranceEnrolled || false, pension: dbEmp.socialInsuranceEnrolled || false, employment: dbEmp.socialInsuranceEnrolled || false },
+          monthly_limit: dbEmp.monthlyLimitHours || 120,
+          maxOffRequests: 2,
+          monthly_current: 0,
+          address: '住所未設定'
+        }))
+        setEmployees(dbEmployees)
+        console.log('✅ 従業員データ取得成功:', dbEmployees)
+      } else {
+        // データベースが空の場合は初期データを使用
+        console.log('データベースが空のため、初期データを使用します')
+      }
+    } catch (error) {
+      console.error('従業員データ取得エラー:', error)
+      setError('データの取得に失敗しました。初期データを表示します。')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // コンポーネントマウント時にデータを取得
+  useEffect(() => {
+    fetchEmployees()
+  }, [])
 
   // フィルタリングされた従業員リスト
   const filteredEmployees = employees.filter(employee => {

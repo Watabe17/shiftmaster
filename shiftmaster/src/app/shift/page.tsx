@@ -306,7 +306,7 @@ export default function ShiftRequestPage() {
           </Card>
 
       {/* ビュータブ */}
-                      <Tabs value={selectedView} onValueChange={(value) => setSelectedView(value as string)}>
+                      <Tabs value={selectedView} onValueChange={(value) => setSelectedView(value as 'calendar' | 'list')}>
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="calendar">カレンダー</TabsTrigger>
           <TabsTrigger value="list">リスト</TabsTrigger>
