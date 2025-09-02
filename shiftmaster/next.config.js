@@ -18,7 +18,7 @@ const nextConfig = {
     return config
   },
   // Vercelデプロイ用の最適化設定
-  output: 'standalone',
+  // output: 'standalone', // Vercelでは不要
   experimental: {
     // turbo設定は削除（deprecated）
   },
