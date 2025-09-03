@@ -14,10 +14,8 @@ const nextConfig: NextConfig = {
     // ビルド時にTypeScriptのエラーを無視
     ignoreBuildErrors: true,
   },
-  // APIルートの静的生成を無効にする
-  experimental: {
-    serverComponentsExternalPackages: ['@prisma/client'],
-  },
+  // Prismaクライアントを外部パッケージとして扱う
+  serverExternalPackages: ['@prisma/client'],
   webpack: (config, { isServer }) => {
     if (!isServer) {
       // クライアントサイドでの環境変数の設定
