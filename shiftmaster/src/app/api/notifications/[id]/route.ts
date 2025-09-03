@@ -6,10 +6,10 @@ const prisma = new PrismaClient()
 // 通知詳細取得
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params
+    const { id } = await params
 
     console.log('🔍 通知詳細取得開始:', { id })
 
@@ -58,10 +58,10 @@ export async function GET(
 // 通知更新（既読・削除など）
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params
+    const { id } = await params
     const updateData = await request.json()
 
     console.log('🔍 通知更新開始:', { id, updateData })
@@ -131,10 +131,10 @@ export async function PUT(
 // 通知削除
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params
+    const { id } = await params
 
     console.log('🔍 通知削除開始:', { id })
 

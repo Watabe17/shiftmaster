@@ -6,10 +6,10 @@ const prisma = new PrismaClient()
 // シフト申請詳細取得
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params
+    const { id } = await params
 
     console.log('🔍 シフト申請詳細取得開始:', { id })
 
@@ -57,10 +57,10 @@ export async function GET(
 // シフト申請更新
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params
+    const { id } = await params
     const updateData = await request.json()
 
     console.log('🔍 シフト申請更新開始:', { id, updateData })
@@ -141,10 +141,10 @@ export async function PUT(
 // シフト申請削除
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params
+    const { id } = await params
 
     console.log('🔍 シフト申請削除開始:', { id })
 

@@ -6,10 +6,10 @@ const prisma = new PrismaClient()
 // 従業員詳細取得
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params
+    const { id } = await params
 
     console.log('🔍 従業員詳細取得開始:', { id })
 
@@ -53,10 +53,10 @@ export async function GET(
 // 従業員更新
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params
+    const { id } = await params
     const updateData = await request.json()
 
     console.log('🔍 従業員更新開始:', { id, updateData })
@@ -127,10 +127,10 @@ export async function PUT(
 // 従業員削除（論理削除）
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params
+    const { id } = await params
 
     console.log('🔍 従業員削除開始:', { id })
 
