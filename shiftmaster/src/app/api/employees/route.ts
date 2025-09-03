@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { PrismaClient } from '@prisma/client'
 import { v4 as uuidv4 } from 'uuid'
 
+// 動的レンダリングを強制
+export const dynamic = 'force-dynamic'
+
 const prisma = new PrismaClient()
 
 // 従業員一覧取得

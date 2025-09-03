@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { v4 as uuidv4 } from 'uuid'
 
+// 動的レンダリングを強制
+export const dynamic = 'force-dynamic'
+
 // 招待トークン生成
 export async function POST(request: NextRequest) {
   try {

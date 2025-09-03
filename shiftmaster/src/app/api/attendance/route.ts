@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { PrismaClient } from '@prisma/client'
 
+// 動的レンダリングを強制
+export const dynamic = 'force-dynamic'
+
 const prisma = new PrismaClient()
 
 // 勤怠状況取得

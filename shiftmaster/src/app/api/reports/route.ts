@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { PrismaClient } from '@prisma/client'
 
+// 動的レンダリングを強制
+export const dynamic = 'force-dynamic'
+
 const prisma = new PrismaClient()
 
 // 勤怠レポート生成

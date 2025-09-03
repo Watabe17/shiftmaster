@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { PrismaClient } from '@prisma/client'
 
-const prisma = new PrismaClient()
+// 動的レンダリングを強制
+export const dynamic = 'force-dynamic'
+
+// Prismaクライアントの初期化を関数内で行う
+function getPrismaClient() {
+  return new PrismaClient()
+}
 
 // 勤怠履歴取得
 export async function GET(request: NextRequest) {
+  const prisma = getPrismaClient()
+  
   try {
     const { searchParams } = new URL(request.url)
     const storeId = searchParams.get('storeId')
@@ -90,11 +98,15 @@ export async function GET(request: NextRequest) {
       { error: '内部サーバーエラー' },
       { status: 500 }
     )
+  } finally {
+    await prisma.$disconnect()
   }
 }
 
 // 勤怠記録の編集
 export async function PUT(request: NextRequest) {
+  const prisma = getPrismaClient()
+  
   try {
     const {
       id,
@@ -178,11 +190,15 @@ export async function PUT(request: NextRequest) {
       { error: '内部サーバーエラー' },
       { status: 500 }
     )
+  } finally {
+    await prisma.$disconnect()
   }
 }
 
 // 勤怠履歴のCSV出力
 export async function POST(request: NextRequest) {
+  const prisma = getPrismaClient()
+  
   try {
     const {
       storeId,
@@ -265,6 +281,8 @@ export async function POST(request: NextRequest) {
       { error: '内部サーバーエラー' },
       { status: 500 }
     )
+  } finally {
+    await prisma.$disconnect()
   }
 }
 
