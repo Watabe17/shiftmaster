@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { PrismaClient } from '@prisma/client'
-import { notificationService } from '@/lib/notification-service'
 
 const prisma = new PrismaClient()
 
@@ -145,17 +144,18 @@ export async function POST(request: NextRequest) {
       console.log('✅ シフト申請更新成功:', updatedRequest.id)
 
       // 通知送信（更新時）
-      try {
-        await notificationService.sendGeneralNotification(
-          employeeId,
-          storeId,
-          'シフト申請が更新されました',
-          `${month}のシフト申請が更新されました。`,
-          'NORMAL'
-        )
-      } catch (notificationError) {
-        console.warn('通知送信に失敗しました:', notificationError)
-      }
+      // TODO: notification-serviceを実装後に有効化
+      // try {
+      //   await notificationService.sendGeneralNotification(
+      //     employeeId,
+      //     storeId,
+      //     'シフト申請が更新されました',
+      //     `${month}のシフト申請が更新されました。`,
+      //     'NORMAL'
+      //   )
+      // } catch (notificationError) {
+      //   console.warn('通知送信に失敗しました:', notificationError)
+      // }
 
       return NextResponse.json({
         success: true,
@@ -201,17 +201,18 @@ export async function POST(request: NextRequest) {
       console.log('✅ シフト申請作成成功:', newRequest.id)
 
       // 通知送信（新規作成時）
-      try {
-        await notificationService.sendGeneralNotification(
-          employeeId,
-          storeId,
-          'シフト申請が作成されました',
-          `${month}のシフト申請が作成されました。`,
-          'NORMAL'
-        )
-      } catch (notificationError) {
-        console.warn('通知送信に失敗しました:', notificationError)
-      }
+      // TODO: notification-serviceを実装後に有効化
+      // try {
+      //   await notificationService.sendGeneralNotification(
+      //     employeeId,
+      //     storeId,
+      //     'シフト申請が作成されました',
+      //     `${month}のシフト申請が作成されました。`,
+      //     'NORMAL'
+      //   )
+      // } catch (notificationError) {
+      //   console.warn('通知送信に失敗しました:', notificationError)
+      // }
 
       return NextResponse.json({
         success: true,
