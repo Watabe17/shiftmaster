@@ -310,3 +310,4 @@ async function generateSummaryReport(storeId: string, startDate?: string, endDat
   }
 }
 
+
