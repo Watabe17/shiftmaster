@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { MessageSquare, ArrowRight, ArrowLeft, Check, Building, User, Eye, EyeOff, HelpCircle, AlertCircle, UserCheck } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
@@ -34,7 +34,8 @@ interface InvitationData {
   message?: string;
 }
 
-const RegisterPage = () => {
+// useSearchParamsを使用するコンポーネントを分離
+const RegisterForm = () => {
   const [currentStep, setCurrentStep] = useState(1);
   const [showPassword, setShowPassword] = useState(false);
   const [showGoogleMapHelp, setShowGoogleMapHelp] = useState(false);
@@ -534,6 +535,22 @@ const RegisterPage = () => {
         </form>
       </div>
     </div>
+  );
+};
+
+// メインのRegisterPageコンポーネント（Suspenseでラップ）
+const RegisterPage = () => {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600">読み込み中...</p>
+        </div>
+      </div>
+    }>
+      <RegisterForm />
+    </Suspense>
   );
 };
 
