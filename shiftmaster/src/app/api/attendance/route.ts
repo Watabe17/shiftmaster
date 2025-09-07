@@ -103,10 +103,15 @@ export async function POST(request: NextRequest) {
     const storeLng = parseFloat(employee.store.longitude?.toString() || '0')
     const storeRadius = employee.store.radiusMeters || 50
 
-    // 距離計算（簡易版）
-    const distance = Math.sqrt(
-      Math.pow(latitude - storeLat, 2) + Math.pow(longitude - storeLng, 2)
-    ) * 111000 // 概算でメートルに変換
+    // 距離計算（ハーバサイン公式）
+    const R = 6371000 // 地球の半径（メートル）
+    const dLat = (latitude - storeLat) * Math.PI / 180
+    const dLng = (longitude - storeLng) * Math.PI / 180
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(storeLat * Math.PI / 180) * Math.cos(latitude * Math.PI / 180) *
+              Math.sin(dLng/2) * Math.sin(dLng/2)
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+    const distance = R * c // メートル単位
 
     console.log('📍 位置情報検証:', {
       storeLat,
@@ -117,12 +122,19 @@ export async function POST(request: NextRequest) {
       radius: storeRadius
     })
 
+    // 位置情報の精度チェック（仕様書要件: GPS±50m以内）
     if (distance > storeRadius) {
       return NextResponse.json({
         error: '店舗から離れすぎています',
         distance: Math.round(distance),
-        radius: storeRadius
+        radius: storeRadius,
+        message: `店舗から${Math.round(distance)}m離れています。許可範囲は${storeRadius}m以内です。`
       }, { status: 400 })
+    }
+
+    // 位置情報の精度が低い場合の警告
+    if (distance > storeRadius * 0.8) {
+      console.warn('⚠️ 位置情報が境界近くです:', { distance, radius: storeRadius })
     }
 
     const now = new Date()
@@ -149,8 +161,7 @@ export async function POST(request: NextRequest) {
           storeId: employee.storeId,
           date: new Date(today),
           clockInTime: now,
-          // 位置情報フィールドは一時的に無効化（スキーマの型不整合のため）
-          // clockInLocation: `${latitude},${longitude}`,
+          locationVerified: true, // 位置情報検証済み
           status: 'IN_PROGRESS'
         }
       })
@@ -185,13 +196,21 @@ export async function POST(request: NextRequest) {
         }, { status: 400 })
       }
 
+      // 勤務時間計算（休憩時間を考慮）
+      const workMinutes = Math.round((now.getTime() - existingRecord.clockInTime.getTime()) / (1000 * 60))
+      const breakMinutes = existingRecord.totalBreakMinutes || 0
+      const actualWorkMinutes = workMinutes - breakMinutes
+      
+      // 残業時間計算（8時間 = 480分を超過した場合）
+      const overtimeMinutes = Math.max(0, actualWorkMinutes - 480)
+
       const attendance = await prisma.attendanceRecord.update({
         where: { id: existingRecord.id },
         data: {
           clockOutTime: now,
-          // 位置情報フィールドは一時的に無効化（スキーマの型不整合のため）
-          // clockOutLocation: `${latitude},${longitude}`,
-          totalWorkMinutes: Math.round((now.getTime() - existingRecord.clockInTime.getTime()) / (1000 * 60)) // 分単位
+          totalWorkMinutes: actualWorkMinutes,
+          overtimeMinutes: overtimeMinutes,
+          status: 'COMPLETED'
         }
       })
 

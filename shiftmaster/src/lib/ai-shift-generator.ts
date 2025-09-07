@@ -88,6 +88,50 @@ class AIShiftGenerator {
   }
 
   /**
+   * API接続テスト
+   */
+  async testConnection(): Promise<boolean> {
+    try {
+      console.log('API接続テスト開始...')
+      
+      // 軽量なテストリクエスト
+      const testPrompt = "Hello, please respond with 'OK'"
+      const requestBody = {
+        contents: [{
+          parts: [{
+            text: testPrompt
+          }]
+        }],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 10,
+        }
+      }
+
+      const url = `${this.baseUrl}:generateContent?key=${this.apiKey}`
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      })
+
+      if (response.ok) {
+        console.log('✅ API接続テスト成功')
+        return true
+      } else {
+        const errorText = await response.text()
+        console.log('❌ API接続テスト失敗:', response.status, errorText)
+        return false
+      }
+    } catch (error) {
+      console.log('❌ API接続テストエラー:', error)
+      return false
+    }
+  }
+
+  /**
    * AIを使用してシフトを生成
    */
   async generateShifts(
@@ -103,6 +147,11 @@ class AIShiftGenerator {
       // APIキーの検証
       if (!this.apiKey || this.apiKey === 'dummy-key') {
         throw this.createError(AIErrorType.API_KEY_INVALID, 'APIキーが設定されていません')
+      }
+      
+      // APIキーの形式を簡易チェック
+      if (!this.apiKey.startsWith('AIza')) {
+        throw this.createError(AIErrorType.API_KEY_INVALID, 'APIキーの形式が正しくありません')
       }
 
       // Gemini APIに送信するプロンプトを構築
@@ -178,41 +227,25 @@ class AIShiftGenerator {
     shiftRules: ShiftRule,
     existingShifts?: GeneratedShift[]
   ): string {
-    let prompt = `以下の条件に基づいて、${month}のシフト表を作成してください。
+    // より簡潔なプロンプトでトークン数を削減
+    let prompt = `シフト作成: ${month}
 
-## 従業員の希望
-${employeePreferences.map(pref => 
-  `- ${pref.employeeName}: ${pref.date} - ${this.getStatusText(pref.status)}` +
-  (pref.preferredStartTime ? ` (希望時間: ${pref.preferredStartTime}-${pref.preferredEndTime})` : '') +
-  (pref.notes ? ` (備考: ${pref.notes})` : '')
-).join('\n')}
+従業員: ${employeePreferences.map(p => `${p.employeeName}(${this.getStatusText(p.status)})`).join(', ')}
+ポジション: ${positionRequirements.map(r => `${r.positionName}(${r.minEmployees}-${r.maxEmployees}名)`).join(', ')}
+ルール: 連続${shiftRules.maxConsecutiveDays}日以内, 休息${shiftRules.minRestHours}h以上
 
-## ポジション要件
-${positionRequirements.map(req => 
-  `- ${req.positionName}: 必要人数 ${req.minEmployees}-${req.maxEmployees}名, 推奨時間 ${req.preferredStartTime}-${req.preferredEndTime}, 休憩 ${req.breakMinutes}分`
-).join('\n')}
-
-## シフトルール
-- 最大連続勤務日数: ${shiftRules.maxConsecutiveDays}日
-- 最小休息時間: ${shiftRules.minRestHours}時間
-- 推奨パターン: ${this.getPatternText(shiftRules.preferredShiftPattern)}
-- 残業回避: ${shiftRules.avoidOvertime ? 'はい' : 'いいえ'}
-- ワークロードバランス: ${shiftRules.balanceWorkload ? '考慮' : '考慮しない'}
-- 従業員希望: ${shiftRules.considerPreferences ? '優先' : '参考程度'}
-
-## 出力形式
-以下のJSON形式で出力してください：
+JSON出力:
 {
   "shifts": [
     {
       "date": "YYYY-MM-DD",
       "employeeName": "従業員名",
-      "positionName": "ポジション名",
+      "positionName": "ポジション名", 
       "startTime": "HH:MM",
       "endTime": "HH:MM",
       "breakMinutes": 60,
       "confidence": 0.9,
-      "reasoning": "このシフトを割り当てた理由"
+      "reasoning": "理由"
     }
   ]
 }`
@@ -232,8 +265,8 @@ ${existingShifts.map(shift =>
    */
   private async callGeminiAPI(prompt: string, shiftRules: ShiftRule): Promise<string> {
     const temperature = shiftRules.temperature || 0.7
-    const maxRetries = 3
-    const baseDelay = 1000 // 1秒
+    const maxRetries = 5 // リトライ回数を増加
+    const baseDelay = 2000 // 2秒に延長
 
     console.log('Gemini API呼び出し開始:', {
       baseUrl: this.baseUrl,
@@ -279,13 +312,19 @@ ${existingShifts.map(shift =>
         console.log(`リトライ ${attempt}/${maxRetries} - リクエストURL:`, url)
         console.log('リクエストボディ:', JSON.stringify(requestBody, null, 2))
 
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 30000) // 30秒タイムアウト
+
         const response = await fetch(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(requestBody)
+          body: JSON.stringify(requestBody),
+          signal: controller.signal
         })
+
+        clearTimeout(timeoutId)
 
         console.log(`リトライ ${attempt}/${maxRetries} - レスポンスステータス:`, response.status, response.statusText)
 
@@ -305,7 +344,7 @@ ${existingShifts.map(shift =>
           if (errorText.includes('RESOURCE_EXHAUSTED') || errorText.includes('quota')) {
             throw this.createError(
               AIErrorType.QUOTA_EXCEEDED,
-              'Gemini APIの利用制限に達しました。手動でシフトを作成するか、しばらく時間をおいて再試行してください。',
+              'Gemini APIの利用制限に達しました。無料枠の制限に達している可能性があります。手動生成モードを使用するか、翌日まで待機して再試行してください。',
               { errorText }
             )
           }
@@ -323,7 +362,7 @@ ${existingShifts.map(shift =>
             const retrySeconds = retryAfter ? Math.ceil(retryAfter / 1000) : 60
             throw this.createError(
               AIErrorType.RATE_LIMIT, 
-              `レート制限によりAPI呼び出しができません。${retrySeconds}秒後に再試行してください。`,
+              `⏰ レート制限によりAPI呼び出しができません。${retrySeconds}秒後に再試行してください。手動生成モードを使用することもできます。`,
               { retryAfter }
             )
           }
@@ -355,6 +394,13 @@ ${existingShifts.map(shift =>
         }
         
         if (attempt === maxRetries) {
+          // タイムアウトエラーの場合
+          if (error.name === 'AbortError') {
+            throw this.createError(
+              AIErrorType.NETWORK_ERROR,
+              'API呼び出しがタイムアウトしました。しばらく時間をおいて再試行してください。'
+            )
+          }
           // ネットワークエラーの場合
           if (error.name === 'TypeError' || error.message.includes('fetch')) {
             throw this.createError(

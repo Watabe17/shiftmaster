@@ -64,17 +64,20 @@ export default function AttendancePage() {
   useEffect(() => {
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
-        (position) => {
-          // 店舗の座標（テスト用: 現在位置を店舗座標として設定）
+        async (position) => {
+          // 店舗の座標を取得
           const userLat = position.coords.latitude
           const userLng = position.coords.longitude
-          const storeLat = userLat  // テスト用: 現在位置を店舗座標として使用
-          const storeLng = userLng  // テスト用: 現在位置を店舗座標として使用
           
-          // 距離計算（テスト用: 常に店舗内）
-          const distance = 0 // 距離0 = 店舗内
+          // 店舗設定から座標を取得（デフォルトは東京駅）
+          const storeLat = parseFloat(process.env.NEXT_PUBLIC_DEFAULT_LATITUDE || '35.6762')
+          const storeLng = parseFloat(process.env.NEXT_PUBLIC_DEFAULT_LONGITUDE || '139.6503')
+          const storeRadius = parseInt(process.env.NEXT_PUBLIC_DEFAULT_RADIUS || '50')
           
-          if (distance <= 50) {
+          // 距離計算（ハーバサイン公式）
+          const distance = calculateDistance(userLat, userLng, storeLat, storeLng)
+          
+          if (distance <= storeRadius) {
             setLocationStatus({
               status: 'ok',
               distance: Math.round(distance),
@@ -189,18 +192,27 @@ export default function AttendancePage() {
       const now = new Date()
       const timeString = now.toTimeString().slice(0, 5)
       
+      // 現在の位置情報を取得
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 60000
+        })
+      })
+      
       // APIに出勤記録を送信
       const response = await fetch('/api/attendance', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-                 body: JSON.stringify({
-           employeeId: 'employee@shiftmaster.test', // 実際の従業員メールアドレス
-           action: 'clockIn',
-           latitude: 35.6762, // テスト用固定座標
-           longitude: 139.6503
-         }),
+        body: JSON.stringify({
+          employeeId: 'employee@shiftmaster.test', // 実際の従業員メールアドレス
+          action: 'clockIn',
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude
+        }),
       })
 
       const data = await response.json()
@@ -252,18 +264,27 @@ export default function AttendancePage() {
       const now = new Date()
       const timeString = now.toTimeString().slice(0, 5)
       
+      // 現在の位置情報を取得
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 60000
+        })
+      })
+      
       // APIに退勤記録を送信
       const response = await fetch('/api/attendance', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-                 body: JSON.stringify({
-           employeeId: 'employee@shiftmaster.test', // 実際の従業員メールアドレス
-           action: 'clockOut',
-           latitude: 35.6762, // テスト用固定座標
-           longitude: 139.6503
-         }),
+        body: JSON.stringify({
+          employeeId: 'employee@shiftmaster.test', // 実際の従業員メールアドレス
+          action: 'clockOut',
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude
+        }),
       })
 
       const data = await response.json()

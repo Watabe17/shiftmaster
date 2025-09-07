@@ -1,6 +1,5 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   env: {
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
@@ -14,8 +13,7 @@ const nextConfig: NextConfig = {
     // ビルド時にTypeScriptのエラーを無視
     ignoreBuildErrors: true,
   },
-  // Prismaクライアントを外部パッケージとして扱う
-  serverExternalPackages: ['@prisma/client'],
+  // Prismaクライアントを外部パッケージとして扱う（Next.js 14では不要）
   webpack: (config, { isServer }) => {
     if (!isServer) {
       // クライアントサイドでの環境変数の設定
@@ -30,8 +28,6 @@ const nextConfig: NextConfig = {
     }
     return config
   },
-  // Vercelデプロイ用の最適化設定
-  serverExternalPackages: ['@prisma/client'],
   // 画像最適化設定
   images: {
     domains: ['localhost'],
@@ -39,4 +35,4 @@ const nextConfig: NextConfig = {
   }
 };
 
-export default nextConfig;
+module.exports = nextConfig;
